@@ -9,6 +9,7 @@ import {
   FileDown,
   HardHat,
   History,
+  LayoutDashboard,
   Plus,
   RefreshCw,
   Save,
@@ -17,6 +18,7 @@ import {
   Upload,
   X,
 } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import {
@@ -302,7 +304,7 @@ const makeSeguridad = (): SeguridadRecord => {
 }
 
 function App() {
-  const [section, setSection] = useState<'captura' | 'dashboard'>('captura')
+  const [section, setSection] = useState<'captura' | 'dashboard'>(getInitialSection)
   const [formType, setFormType] = useState<RecordType>('barrenacion')
   const [barrenacion, setBarrenacion] = useState<BarrenacionRecord>(makeBarrenacion)
   const [rezagado, setRezagado] = useState<RezagadoRecord>(makeRezagado)
@@ -498,6 +500,20 @@ function App() {
             <strong>Bitacora de Operaciones Mina</strong>
           </div>
         </div>
+        <nav className="mode-tabs" aria-label="Vista principal">
+          <button className={section === 'captura' ? 'active' : ''} onClick={() => setSection('captura')}>
+            <ClipboardCheck size={18} /> Captura
+          </button>
+          <button
+            className={section === 'dashboard' ? 'active' : ''}
+            onClick={() => {
+              setSection('dashboard')
+              void syncRecords({ silent: true })
+            }}
+          >
+            <LayoutDashboard size={18} /> Revision web
+          </button>
+        </nav>
         <button className="sync-button" onClick={() => void syncRecords()} disabled={syncing}>
           <RefreshCw size={18} className={syncing ? 'spin' : ''} />
           {syncing ? 'Conectando' : pendingSync > 0 ? 'Pendiente' : 'Al dia'}
@@ -914,6 +930,14 @@ function loadRecords(): MineRecord[] {
   } catch {
     return []
   }
+}
+
+function getInitialSection(): 'captura' | 'dashboard' {
+  const params = new URLSearchParams(window.location.search)
+  const requestedView = params.get('vista')
+  if (requestedView === 'captura') return 'captura'
+  if (requestedView === 'revision' || requestedView === 'dashboard') return 'dashboard'
+  return Capacitor.isNativePlatform() ? 'captura' : 'dashboard'
 }
 
 function loadApiUrl() {
