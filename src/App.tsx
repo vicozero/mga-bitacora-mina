@@ -9,7 +9,6 @@ import {
   FileDown,
   HardHat,
   History,
-  LayoutDashboard,
   Plus,
   RefreshCw,
   Save,
@@ -157,6 +156,7 @@ type RowField<T> = { key: keyof T; label: string; type?: string; options?: strin
 
 const STORAGE_KEY = 'mga-bitacora-operaciones-v1'
 const API_URL_KEY = 'mga-bitacora-api-url'
+const DEFAULT_API_URL = 'https://mga-bitacora-mina.onrender.com'
 const today = new Date().toISOString().slice(0, 10)
 
 const baseDefaults = {
@@ -336,10 +336,20 @@ function App() {
     localStorage.setItem(API_URL_KEY, apiUrl)
   }, [apiUrl])
 
+  useEffect(() => {
+    void syncRecords({ silent: true })
+    const handleOnline = () => void syncRecords({ silent: true })
+    window.addEventListener('online', handleOnline)
+    return () => window.removeEventListener('online', handleOnline)
+    // The initial sync must run once on startup; saves trigger their own sync with fresh records.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function persist(next: MineRecord[]) {
     const normalized = mergeRecords(next.map(normalizeRecord))
     setRecords(normalized)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
+    return normalized
   }
 
   function saveRecord(event: FormEvent) {
@@ -355,10 +365,11 @@ function App() {
     const next = editingId
       ? records.map((record) => (record.id === editingId ? updated : record))
       : [updated, ...records]
-    persist(next)
+    const persisted = persist(next)
     resetForm(formType)
     setEditingId(null)
     setMessage(editingId ? 'Captura actualizada offline.' : 'Registro guardado offline en este dispositivo.')
+    void syncRecords({ silent: true, sourceRecords: persisted })
   }
 
   function resetForm(type: RecordType) {
@@ -394,14 +405,15 @@ function App() {
 
   function removeRecord(id: string) {
     const deletedAt = nowIso()
-    persist(
+    const persisted = persist(
       records.map((record) =>
         record.id === id
           ? normalizeRecord({ ...record, deletedAt, updatedAt: deletedAt, syncedAt: undefined } as MineRecord)
           : record,
       ),
     )
-    setMessage('Captura eliminada localmente. Sincroniza para eliminarla en Render.')
+    setMessage('Captura eliminada localmente.')
+    void syncRecords({ silent: true, sourceRecords: persisted })
   }
 
   function exportJson() {
@@ -418,20 +430,21 @@ function App() {
     const file = event.target.files?.[0]
     if (!file) return
     const imported = JSON.parse(await file.text()) as MineRecord[]
-    persist([...imported.map(normalizeRecord), ...records])
+    const persisted = persist([...imported.map(normalizeRecord), ...records])
     setMessage('Datos importados al panel local.')
+    void syncRecords({ silent: true, sourceRecords: persisted })
     event.target.value = ''
   }
 
-  async function syncRecords() {
+  async function syncRecords(options: { silent?: boolean; sourceRecords?: MineRecord[] } = {}) {
     const apiBase = resolveApiBase(apiUrl)
-    if (window.location.protocol === 'capacitor:' && !apiBase) {
-      setMessage('Configura la URL de Render antes de sincronizar desde la APK.')
+    if (!apiBase || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      if (!options.silent) setMessage('Sin internet. La captura queda guardada y se enviara automaticamente.')
       return
     }
     setSyncing(true)
     try {
-      const localRecords = records.map(normalizeRecord)
+      const localRecords = (options.sourceRecords ?? records).map(normalizeRecord)
       const response = await fetch(`${apiBase}/api/records/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -446,9 +459,9 @@ function App() {
           syncedAt: record.updatedAt ?? syncedAt,
         })),
       )
-      setMessage('Sincronizacion completada con Render.')
+      if (!options.silent) setMessage('Sincronizacion completada con Render.')
     } catch {
-      setMessage('No se pudo sincronizar. Revisa internet y la URL de Render.')
+      if (!options.silent) setMessage('No se pudo sincronizar. Se reintentara automaticamente cuando haya red.')
     } finally {
       setSyncing(false)
     }
@@ -485,16 +498,9 @@ function App() {
             <strong>Bitacora de Operaciones Mina</strong>
           </div>
         </div>
-        <nav className="mode-tabs" aria-label="Vista principal">
-          <button className={section === 'captura' ? 'active' : ''} onClick={() => setSection('captura')}>
-            <ClipboardCheck size={18} /> Captura
-          </button>
-          <button className={section === 'dashboard' ? 'active' : ''} onClick={() => setSection('dashboard')}>
-            <LayoutDashboard size={18} /> Revision web
-          </button>
-        </nav>
-        <button className="sync-button" onClick={syncRecords} disabled={syncing}>
-          <RefreshCw size={18} className={syncing ? 'spin' : ''} /> Sincronizar
+        <button className="sync-button" onClick={() => void syncRecords()} disabled={syncing}>
+          <RefreshCw size={18} className={syncing ? 'spin' : ''} />
+          {syncing ? 'Conectando' : pendingSync > 0 ? 'Pendiente' : 'Al dia'}
           {pendingSync > 0 && <span>{pendingSync}</span>}
         </button>
       </header>
@@ -504,16 +510,15 @@ function App() {
       {section === 'captura' ? (
         <form className="workspace" onSubmit={saveRecord}>
           <aside className="side-panel">
-            <h1>{editingId ? 'Editar captura' : 'Captura offline'}</h1>
-            <p>Guarda sin internet y sincroniza con Render cuando haya red.</p>
-            <label className="server-field">
-              URL Render
-              <input
-                placeholder="https://tu-servicio.onrender.com"
-                value={apiUrl}
-                onChange={(event) => setApiUrl(event.target.value)}
-              />
-            </label>
+            <div className="capture-badge">
+              <ClipboardCheck size={18} /> Captura de turno
+            </div>
+            <h1>{editingId ? 'Editar captura' : 'Nueva captura'}</h1>
+            <p>Registra la operacion en campo. La app guarda sin internet y envia los datos automaticamente cuando detecta red.</p>
+            <div className="connection-card">
+              <span>Conexion automatica</span>
+              <strong>{syncing ? 'Sincronizando' : pendingSync > 0 ? `${pendingSync} por enviar` : 'Datos al dia'}</strong>
+            </div>
             <div className="record-tabs">
               <button type="button" className={formType === 'barrenacion' ? 'active' : ''} onClick={() => selectFormType('barrenacion')}>
                 <HardHat size={18} /> Barrenacion y voladuras
@@ -563,7 +568,7 @@ function App() {
                 value={apiUrl}
                 onChange={(event) => setApiUrl(event.target.value)}
               />
-              <button onClick={syncRecords} disabled={syncing}>
+              <button onClick={() => void syncRecords()} disabled={syncing}>
                 <RefreshCw size={18} className={syncing ? 'spin' : ''} /> Sincronizar
               </button>
               <button onClick={exportJson}>
@@ -912,11 +917,11 @@ function loadRecords(): MineRecord[] {
 }
 
 function loadApiUrl() {
-  return localStorage.getItem(API_URL_KEY) ?? import.meta.env.VITE_API_URL ?? ''
+  return localStorage.getItem(API_URL_KEY) ?? import.meta.env.VITE_API_URL ?? DEFAULT_API_URL
 }
 
 function resolveApiBase(apiUrl: string) {
-  return apiUrl.trim().replace(/\/$/, '')
+  return (apiUrl.trim() || DEFAULT_API_URL).replace(/\/$/, '')
 }
 
 function normalizeRecord(record: MineRecord): MineRecord {

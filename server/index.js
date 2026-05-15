@@ -59,7 +59,7 @@ app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(distDir, 'index.html'))
 })
 
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`MGA bitacora server running on ${port}`)
 })
 
