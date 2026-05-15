@@ -1,0 +1,17 @@
+{
+  "name": "MGA Bitacora Operaciones Mina",
+  "short_name": "MGA Mina",
+  "description": "Captura offline y revision KPI para operaciones mina.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eef2f5",
+  "theme_color": "#007b83",
+  "icons": [
+    {
+      "src": "/mga-logo.jfif",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}

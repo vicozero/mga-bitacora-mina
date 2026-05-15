@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: mga-bitacora-mina
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 24.15.0
+      - key: DATA_FILE
+        value: /var/data/records.json
+    disk:
+      name: mga-bitacora-data
+      mountPath: /var/data
+      sizeGB: 1
