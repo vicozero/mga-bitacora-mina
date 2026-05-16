@@ -131,6 +131,7 @@ type BaseRecord = {
 
 type BarrenacionRecord = BaseRecord & {
   type: 'barrenacion'
+  activeActivity?: BarrenacionActivity
   jumbo: DrillRow[]
   maquinaPierna: DrillRow[]
   voladuras: BlastRow[]
@@ -146,6 +147,9 @@ type BarrenacionRecord = BaseRecord & {
 
 type RezagadoRecord = BaseRecord & {
   type: 'rezagado'
+  activeEquipment?: RezagadoEquipment
+  activeHaulActivity?: HaulActivity
+  activeRetroActivity?: RetroActivity
   scoopTram: HaulRow[]
   retro: RetroRow[]
   comentarios: string
@@ -172,6 +176,8 @@ const API_URL_KEY = 'mga-bitacora-api-url'
 const DEFAULT_API_URL = 'https://mga-bitacora-mina.onrender.com'
 const BARRENACION_TEMPLATE = '/templates/barrenacion-voladuras.pdf'
 const REZAGADO_TEMPLATE = '/templates/rezagado.pdf'
+const barrenacionActivities = ['jumbo', 'maquinaPierna', 'voladura'] as const
+const rezagadoEquipments = ['scoop', 'retro'] as const
 const today = new Date().toISOString().slice(0, 10)
 
 const baseDefaults = {
@@ -267,6 +273,7 @@ const makeBarrenacion = (): BarrenacionRecord => {
     createdAt: now,
     updatedAt: now,
     ...baseDefaults,
+    activeActivity: 'jumbo',
     jumbo: [emptyDrillRow(defaultJumbo)],
     maquinaPierna: [],
     voladuras: [],
@@ -289,6 +296,9 @@ const makeRezagado = (): RezagadoRecord => {
     createdAt: now,
     updatedAt: now,
     ...baseDefaults,
+    activeEquipment: 'scoop',
+    activeHaulActivity: 'rezagado',
+    activeRetroActivity: 'amacice',
     scoopTram: [emptyHaulRow(defaultScoop)],
     retro: [],
     comentarios: '',
@@ -986,7 +996,13 @@ function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; set
 
   function selectActivity(next: BarrenacionActivity) {
     if (next === 'voladura') {
-      setRecord({ ...record, jumbo: [], maquinaPierna: [], voladuras: [record.voladuras[0] ?? emptyBlastRow()] })
+      setRecord({
+        ...record,
+        activeActivity: next,
+        jumbo: [],
+        maquinaPierna: [],
+        voladuras: [record.voladuras[0] ?? emptyBlastRow()],
+      })
       return
     }
     const currentDrill = (next === 'maquinaPierna' ? record.maquinaPierna[0] : record.jumbo[0])
@@ -995,6 +1011,7 @@ function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; set
       ?? emptyDrillRow(defaultJumbo)
     setRecord({
       ...record,
+      activeActivity: next,
       jumbo: next === 'jumbo' ? [currentDrill] : [],
       maquinaPierna: next === 'maquinaPierna' ? [currentDrill] : [],
       voladuras: [],
@@ -1005,13 +1022,14 @@ function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; set
     const updated = { ...drillRow, ...patch }
     setRecord({
       ...record,
+      activeActivity: activity,
       jumbo: activity === 'jumbo' ? [updated] : record.jumbo,
       maquinaPierna: activity === 'maquinaPierna' ? [updated] : record.maquinaPierna,
     })
   }
 
   function updateBlast(patch: Partial<BlastRow>) {
-    setRecord({ ...record, voladuras: [{ ...blastRow, ...patch }] })
+    setRecord({ ...record, activeActivity: 'voladura', voladuras: [{ ...blastRow, ...patch }] })
   }
 
   return (
@@ -1089,23 +1107,34 @@ function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord
   const equipment = getRezagadoEquipment(record)
   const scoopRow = record.scoopTram[0] ?? emptyHaulRow(defaultScoop)
   const retroRow = record.retro[0] ?? emptyRetroRow()
-  const haulActivity = getActiveKey(scoopRow, haulActivityKeys, 'rezagado')
-  const retroActivity = getActiveKey(retroRow, retroActivityKeys, 'amacice')
+  const haulActivity = getHaulActivity(record, scoopRow)
+  const retroActivity = getRetroActivity(record, retroRow)
 
   function selectEquipment(next: RezagadoEquipment) {
     setRecord({
       ...record,
+      activeEquipment: next,
       scoopTram: next === 'scoop' ? [record.scoopTram[0] ?? emptyHaulRow(defaultScoop)] : [],
       retro: next === 'retro' ? [record.retro[0] ?? emptyRetroRow()] : [],
     })
   }
 
-  function updateScoop(row: HaulRow) {
-    setRecord({ ...record, scoopTram: [row] })
+  function updateScoop(row: HaulRow, activeActivity = haulActivity) {
+    setRecord({
+      ...record,
+      activeEquipment: 'scoop',
+      activeHaulActivity: activeActivity,
+      scoopTram: [row],
+    })
   }
 
-  function updateRetro(row: RetroRow) {
-    setRecord({ ...record, retro: [row] })
+  function updateRetro(row: RetroRow, activeActivity = retroActivity) {
+    setRecord({
+      ...record,
+      activeEquipment: 'retro',
+      activeRetroActivity: activeActivity,
+      retro: [row],
+    })
   }
 
   return (
@@ -1143,12 +1172,12 @@ function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord
                   key={key}
                   active={haulActivity === key}
                   label={haulActivityLabels[key]}
-                  onClick={() => updateScoop(withSingleMetric(scoopRow, haulActivityKeys, key, Number(scoopRow[haulActivity] || 0)))}
+                  onClick={() => updateScoop(withSingleMetric(scoopRow, haulActivityKeys, key, Number(scoopRow[haulActivity] || 0)), key)}
                 />
               ))}
             </div>
             <div className="form-grid quick">
-              <Field label="Cantidad" type="number" value={scoopRow[haulActivity]} onChange={(value) => updateScoop(withSingleMetric(scoopRow, haulActivityKeys, haulActivity, Number(value)))} />
+              <Field label="Cantidad" type="number" value={scoopRow[haulActivity]} onChange={(value) => updateScoop(withSingleMetric(scoopRow, haulActivityKeys, haulActivity, Number(value)), haulActivity)} />
               <Field label="Camiones" type="number" value={scoopRow.camiones} onChange={(value) => updateScoop({ ...scoopRow, camiones: Number(value) })} />
               <Field label="Hor. inicial" type="number" value={scoopRow.horometroInicial} onChange={(value) => updateScoop({ ...scoopRow, horometroInicial: Number(value) })} />
               <Field label="Hor. final" type="number" value={scoopRow.horometroFinal} onChange={(value) => updateScoop({ ...scoopRow, horometroFinal: Number(value) })} />
@@ -1164,12 +1193,12 @@ function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord
                   key={key}
                   active={retroActivity === key}
                   label={retroActivityLabels[key]}
-                  onClick={() => updateRetro(withSingleMetric(retroRow, retroActivityKeys, key, Number(retroRow[retroActivity] || 0)))}
+                  onClick={() => updateRetro(withSingleMetric(retroRow, retroActivityKeys, key, Number(retroRow[retroActivity] || 0)), key)}
                 />
               ))}
             </div>
             <div className="form-grid quick">
-              <Field label="Cantidad" type="number" value={retroRow[retroActivity]} onChange={(value) => updateRetro(withSingleMetric(retroRow, retroActivityKeys, retroActivity, Number(value)))} />
+              <Field label="Cantidad" type="number" value={retroRow[retroActivity]} onChange={(value) => updateRetro(withSingleMetric(retroRow, retroActivityKeys, retroActivity, Number(value)), retroActivity)} />
               <Field label="Hor. inicial" type="number" value={retroRow.horometroInicial} onChange={(value) => updateRetro({ ...retroRow, horometroInicial: Number(value) })} />
               <Field label="Hor. final" type="number" value={retroRow.horometroFinal} onChange={(value) => updateRetro({ ...retroRow, horometroFinal: Number(value) })} />
               <Field label="Diesel" type="number" value={retroRow.diesel} onChange={(value) => updateRetro({ ...retroRow, diesel: Number(value) })} />
@@ -1766,11 +1795,29 @@ function resolveApiBase(apiUrl: string) {
 
 function normalizeRecord(record: MineRecord): MineRecord {
   const createdAt = record.createdAt ?? nowIso()
-  return {
+  const baseRecord = {
     ...record,
     createdAt,
     updatedAt: record.updatedAt ?? createdAt,
   } as MineRecord
+
+  if (baseRecord.type === 'barrenacion') {
+    return {
+      ...baseRecord,
+      activeActivity: getBarrenacionActivity(baseRecord),
+    }
+  }
+  if (baseRecord.type === 'rezagado') {
+    const scoopRow = baseRecord.scoopTram[0] ?? emptyHaulRow(defaultScoop)
+    const retroRow = baseRecord.retro[0] ?? emptyRetroRow()
+    return {
+      ...baseRecord,
+      activeEquipment: getRezagadoEquipment(baseRecord),
+      activeHaulActivity: getHaulActivity(baseRecord, scoopRow),
+      activeRetroActivity: getRetroActivity(baseRecord, retroRow),
+    }
+  }
+  return baseRecord
 }
 
 function mergeRecords(records: MineRecord[]) {
@@ -2091,14 +2138,42 @@ function hasRetroData(row: RetroRow) {
 }
 
 function getBarrenacionActivity(record: BarrenacionRecord): BarrenacionActivity {
+  if (isBarrenacionActivity(record.activeActivity)) return record.activeActivity
   if (record.voladuras.some(hasBlastData)) return 'voladura'
   if (record.maquinaPierna.some(hasDrillData)) return 'maquinaPierna'
   return 'jumbo'
 }
 
 function getRezagadoEquipment(record: RezagadoRecord): RezagadoEquipment {
+  if (isRezagadoEquipment(record.activeEquipment)) return record.activeEquipment
   if (record.retro.some(hasRetroData) && !record.scoopTram.some(hasHaulData)) return 'retro'
   return 'scoop'
+}
+
+function getHaulActivity(record: RezagadoRecord, row: HaulRow): HaulActivity {
+  if (isHaulActivity(record.activeHaulActivity)) return record.activeHaulActivity
+  return getActiveKey(row, haulActivityKeys, 'rezagado')
+}
+
+function getRetroActivity(record: RezagadoRecord, row: RetroRow): RetroActivity {
+  if (isRetroActivity(record.activeRetroActivity)) return record.activeRetroActivity
+  return getActiveKey(row, retroActivityKeys, 'amacice')
+}
+
+function isBarrenacionActivity(value: unknown): value is BarrenacionActivity {
+  return barrenacionActivities.includes(value as BarrenacionActivity)
+}
+
+function isRezagadoEquipment(value: unknown): value is RezagadoEquipment {
+  return rezagadoEquipments.includes(value as RezagadoEquipment)
+}
+
+function isHaulActivity(value: unknown): value is HaulActivity {
+  return haulActivityKeys.includes(value as HaulActivity)
+}
+
+function isRetroActivity(value: unknown): value is RetroActivity {
+  return retroActivityKeys.includes(value as RetroActivity)
 }
 
 function getActiveKey<T extends Record<string, string | number>, K extends keyof T>(
