@@ -27,16 +27,21 @@ app.get('/api/records', async (_req, res) => {
 app.post('/api/records/sync', async (req, res) => {
   const incoming = Array.isArray(req.body?.records) ? req.body.records : []
   const existing = await readRecords()
+  const slackEvents = getSlackEvents(incoming, existing)
   const records = mergeRecords([...existing, ...incoming])
   await writeRecords(records)
+  void notifySlack(slackEvents)
   res.json({ records })
 })
 
 app.put('/api/records/:id', async (req, res) => {
   const now = new Date().toISOString()
+  const existing = await readRecords()
   const record = normalizeRecord({ ...req.body, id: req.params.id, updatedAt: now })
-  const records = mergeRecords([...(await readRecords()), record])
+  const slackEvents = getSlackEvents([record], existing)
+  const records = mergeRecords([...existing, record])
   await writeRecords(records)
+  void notifySlack(slackEvents)
   res.json({ record })
 })
 
@@ -51,6 +56,7 @@ app.delete('/api/records/:id', async (req, res) => {
   })
   const records = mergeRecords([...existing, deleted])
   await writeRecords(records)
+  void notifySlack([{ action: 'deleted', record: deleted }])
   res.json({ record: deleted })
 })
 
@@ -100,4 +106,58 @@ function mergeRecords(records) {
   return Array.from(map.values()).sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   )
+}
+
+function getSlackEvents(incoming, existing) {
+  const existingById = new Map(existing.map((record) => [record.id, record]))
+  return incoming
+    .map(normalizeRecord)
+    .filter((record) => {
+      const current = existingById.get(record.id)
+      return !current || new Date(record.updatedAt).getTime() > new Date(current.updatedAt).getTime()
+    })
+    .map((record) => ({
+      action: record.deletedAt ? 'deleted' : existingById.has(record.id) ? 'updated' : 'created',
+      record,
+    }))
+}
+
+async function notifySlack(events) {
+  const webhookUrl = process.env.SLACK_WEBHOOK_URL
+  if (!webhookUrl || events.length === 0) return
+
+  const maxEvents = 8
+  const lines = events.slice(0, maxEvents).map(formatSlackEvent)
+  const extra = events.length > maxEvents ? `\n...y ${events.length - maxEvents} mas.` : ''
+  const text = `MGA Bitacora Mina: ${events.length} cambio(s) sincronizado(s)\n${lines.join('\n')}${extra}`
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    if (!response.ok) {
+      console.error(`Slack webhook failed with HTTP ${response.status}`)
+    }
+  } catch (error) {
+    console.error('Slack webhook failed', error)
+  }
+}
+
+function formatSlackEvent({ action, record }) {
+  const actionLabel = {
+    created: 'Nuevo',
+    updated: 'Actualizado',
+    deleted: 'Eliminado',
+  }[action]
+  const typeLabel = {
+    barrenacion: 'Barrenacion/voladuras',
+    rezagado: 'Rezagado',
+    seguridad: 'Seguridad',
+  }[record.type] || record.type
+  const supervisor = record.supervisor ? ` - ${record.supervisor}` : ''
+  const turno = record.turno ? ` turno ${record.turno}` : ''
+  const fecha = record.fecha ? ` ${record.fecha}` : ''
+  return `- ${actionLabel}: ${typeLabel}${fecha}${turno}${supervisor}`
 }

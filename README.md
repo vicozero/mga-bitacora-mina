@@ -37,6 +37,17 @@ Endpoints:
 - `GET /api/records`
 - `POST /api/records/sync`
 
+## Slack
+
+El servidor puede avisar a un canal de Slack cada vez que recibe capturas nuevas, actualizadas o eliminadas. Configurar un Incoming Webhook de Slack y guardar la URL como variable de entorno:
+
+```powershell
+$env:SLACK_WEBHOOK_URL='https://hooks.slack.com/services/...'
+npm start
+```
+
+En Render, agregar `SLACK_WEBHOOK_URL` en Environment Variables y redeployar el servicio. No pongas esta URL en el frontend ni en el repositorio.
+
 En Render, desplegar el repositorio como Web Service. La APK debe tener configurada la URL publicada, por ejemplo:
 
 `https://mga-bitacora-mina.onrender.com`
