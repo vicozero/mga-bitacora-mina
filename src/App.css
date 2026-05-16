@@ -419,6 +419,87 @@ button:hover,
   margin-top: 8px;
 }
 
+.recent-captures {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.recent-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #fff;
+}
+
+.recent-title span {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.recent-title strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.recent-captures p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 13px;
+}
+
+.recent-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.recent-card > button:first-child {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  box-shadow: none;
+}
+
+.recent-card > button:first-child span {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.recent-card > button:first-child strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: #fff;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .server-field {
   margin: 16px 0;
 }
@@ -449,6 +530,128 @@ button:hover,
 
 .form-grid.dense {
   grid-template-columns: repeat(5, minmax(145px, 1fr));
+}
+
+.form-grid.quick {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.quick-section {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.quick-section:first-of-type {
+  margin-top: 0;
+}
+
+.quick-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quick-section-title span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #e8f4f1;
+  color: #007b83;
+}
+
+.quick-section-title h2 {
+  margin: 0;
+  color: #182836;
+  font-size: 18px;
+}
+
+.quick-choice-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.quick-choice-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quick-choice-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.quick-choice-grid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.choice-button {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  min-height: 76px;
+  padding: 12px;
+  border-color: #d7e1e7;
+  background: #fff;
+  color: #243442;
+  text-align: left;
+}
+
+.choice-button span {
+  color: #007b83;
+}
+
+.choice-button strong {
+  font-size: 15px;
+  line-height: 1.15;
+}
+
+.choice-button small {
+  color: #6a7885;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.choice-button.active {
+  background: #102a34;
+  border-color: #102a34;
+  color: #fff;
+  box-shadow: 0 14px 26px rgba(16, 42, 52, 0.2);
+}
+
+.choice-button.active span,
+.choice-button.active small {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.quick-details {
+  margin-top: 4px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.quick-details summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  color: #21313f;
+  font-weight: 900;
+}
+
+.quick-details > .form-grid,
+.quick-details > label {
+  padding: 0 14px 14px;
+}
+
+.quick-details .textarea-field {
+  margin-top: 0;
 }
 
 label {
@@ -704,6 +907,7 @@ th {
 
   .form-grid.four,
   .form-grid.three,
+  .form-grid.quick,
   .form-grid.dense,
   .kpi-grid,
   .summary-grid {
@@ -883,9 +1087,16 @@ th {
 
   .form-grid.four,
   .form-grid.three,
+  .form-grid.quick,
   .form-grid.dense,
   .kpi-grid,
   .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-choice-grid.two,
+  .quick-choice-grid.three,
+  .quick-choice-grid.compact {
     grid-template-columns: 1fr;
   }
 

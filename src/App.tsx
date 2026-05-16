@@ -15,7 +15,6 @@ import {
   MoreVertical,
   Mountain,
   Pickaxe,
-  Plus,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -36,6 +35,10 @@ import './App.css'
 
 type Shift = '1' | '2'
 type RecordType = 'barrenacion' | 'rezagado' | 'seguridad'
+type BarrenacionActivity = 'jumbo' | 'maquinaPierna' | 'voladura'
+type RezagadoEquipment = 'scoop' | 'retro'
+type HaulActivity = 'rezagado' | 'traspaleo' | 'limpia' | 'balastreo' | 'planilla' | 'relleno'
+type RetroActivity = 'amacice' | 'reAmacice' | 'tableo' | 'limpia' | 'balastreo' | 'mtAcequia'
 
 type DrillRow = {
   equipo: string
@@ -160,7 +163,6 @@ type SeguridadRecord = BaseRecord & {
 }
 
 type MineRecord = BarrenacionRecord | RezagadoRecord | SeguridadRecord
-type RowField<T> = { key: keyof T; label: string; type?: string; options?: string[] }
 
 const STORAGE_KEY = 'mga-bitacora-operaciones-v1'
 const API_URL_KEY = 'mga-bitacora-api-url'
@@ -261,8 +263,8 @@ const makeBarrenacion = (): BarrenacionRecord => {
     updatedAt: now,
     ...baseDefaults,
     jumbo: [emptyDrillRow(defaultJumbo)],
-    maquinaPierna: [emptyDrillRow(defaultJumbo)],
-    voladuras: [emptyBlastRow()],
+    maquinaPierna: [],
+    voladuras: [],
     polvorero: '',
     choferCamion: '',
     choferPipa: '',
@@ -283,7 +285,7 @@ const makeRezagado = (): RezagadoRecord => {
     updatedAt: now,
     ...baseDefaults,
     scoopTram: [emptyHaulRow(defaultScoop)],
-    retro: [emptyRetroRow()],
+    retro: [],
     comentarios: '',
   }
 }
@@ -344,6 +346,7 @@ function App() {
     }),
     [visibleRecords],
   )
+  const recentRecords = useMemo(() => visibleRecords.slice(0, 4), [visibleRecords])
   const pendingSync = useMemo(
     () => records.filter((record) => record.updatedAt !== record.syncedAt).length,
     [records],
@@ -551,7 +554,7 @@ function App() {
               <Mountain size={18} /> Operacion mina
             </div>
             <h1>{editingId ? 'Editar captura' : 'Nueva captura'}</h1>
-            <p>Registra la operacion en campo. La app guarda sin internet y envia los datos automaticamente cuando detecta red.</p>
+            <p>Captura un evento de campo con los datos clave. El reporte completo se arma en la revision web.</p>
             <div className="connection-card">
               <span>Conexion automatica</span>
               <strong>{syncing ? 'Sincronizando' : pendingSync > 0 ? `${pendingSync} por enviar` : 'Datos al dia'}</strong>
@@ -609,6 +612,27 @@ function App() {
                 <X size={18} /> Cancelar edicion
               </button>
             )}
+            <div className="recent-captures">
+              <div className="recent-title">
+                <span>Capturas recientes</span>
+                <strong>{recordCounts.total}</strong>
+              </div>
+              {recentRecords.length === 0 ? (
+                <p>Sin capturas todavia.</p>
+              ) : (
+                recentRecords.map((record) => (
+                  <article className="recent-card" key={record.id}>
+                    <button type="button" onClick={() => startEdit(record)}>
+                      <span>{labelType(record.type)}</span>
+                      <strong>{record.fecha} · Turno {record.turno}</strong>
+                    </button>
+                    <button className="icon-button danger" type="button" onClick={() => removeRecord(record.id)} aria-label="Eliminar captura">
+                      <Trash2 size={16} />
+                    </button>
+                  </article>
+                ))
+              )}
+            </div>
           </aside>
 
           <section className="form-panel">
@@ -762,62 +786,208 @@ function BaseFields<T extends BaseRecord>({
 }
 
 function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; setRecord: (record: BarrenacionRecord) => void }) {
+  const activity = getBarrenacionActivity(record)
+  const drillRow =
+    activity === 'maquinaPierna'
+      ? record.maquinaPierna[0] ?? emptyDrillRow(defaultJumbo)
+      : record.jumbo[0] ?? emptyDrillRow(defaultJumbo)
+  const blastRow = record.voladuras[0] ?? emptyBlastRow()
+
+  function selectActivity(next: BarrenacionActivity) {
+    if (next === 'voladura') {
+      setRecord({ ...record, jumbo: [], maquinaPierna: [], voladuras: [record.voladuras[0] ?? emptyBlastRow()] })
+      return
+    }
+    const currentDrill = (next === 'maquinaPierna' ? record.maquinaPierna[0] : record.jumbo[0])
+      ?? record.jumbo[0]
+      ?? record.maquinaPierna[0]
+      ?? emptyDrillRow(defaultJumbo)
+    setRecord({
+      ...record,
+      jumbo: next === 'jumbo' ? [currentDrill] : [],
+      maquinaPierna: next === 'maquinaPierna' ? [currentDrill] : [],
+      voladuras: [],
+    })
+  }
+
+  function updateDrill(patch: Partial<DrillRow>) {
+    const updated = { ...drillRow, ...patch }
+    setRecord({
+      ...record,
+      jumbo: activity === 'jumbo' ? [updated] : record.jumbo,
+      maquinaPierna: activity === 'maquinaPierna' ? [updated] : record.maquinaPierna,
+    })
+  }
+
+  function updateBlast(patch: Partial<BlastRow>) {
+    setRecord({ ...record, voladuras: [{ ...blastRow, ...patch }] })
+  }
+
   return (
     <>
-      <PanelTitle title="Reporte Diario de Barrenacion y Voladuras" subtitle="Basado en el formato original MGA" />
-      <BaseFields record={record} setRecord={setRecord} />
-      <EditableRows
-        title="Jumbo"
-        rows={record.jumbo}
-        onAdd={() => setRecord({ ...record, jumbo: [...record.jumbo, emptyDrillRow(defaultJumbo)] })}
-        onChange={(jumbo) => setRecord({ ...record, jumbo })}
-        fields={drillFields(jumboEquipoOptions)}
-      />
-      <EditableRows
-        title="Maquina pierna"
-        rows={record.maquinaPierna}
-        onAdd={() => setRecord({ ...record, maquinaPierna: [...record.maquinaPierna, emptyDrillRow(defaultJumbo)] })}
-        onChange={(maquinaPierna) => setRecord({ ...record, maquinaPierna })}
-        fields={drillFields(jumboEquipoOptions)}
-      />
-      <EditableRows
-        title="Voladuras"
-        rows={record.voladuras}
-        onAdd={() => setRecord({ ...record, voladuras: [...record.voladuras, emptyBlastRow()] })}
-        onChange={(voladuras) => setRecord({ ...record, voladuras })}
-        fields={blastFields}
-      />
-      <div className="form-grid three">
-        {(['polvorero', 'choferCamion', 'choferPipa', 'bobCat', 'bombeo', 'servicios'] as const).map((key) => (
-          <Field key={key} label={activityLabels[key]} value={record[key]} onChange={(value) => setRecord({ ...record, [key]: value })} />
-        ))}
-      </div>
-      <TextArea label="Contratiempos de operacion / comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
-      <TextArea label="Inasistencias / permisos" value={record.inasistencias} onChange={(value) => setRecord({ ...record, inasistencias: value })} />
+      <PanelTitle title="Captura rapida de barrenos" subtitle="Evento corto de campo" />
+      <QuickSection title="Turno" icon={<Mountain size={18} />}>
+        <BaseFields record={record} setRecord={setRecord} />
+      </QuickSection>
+      <QuickSection title="Actividad" icon={<Drill size={18} />}>
+        <div className="quick-choice-grid three">
+          <ChoiceButton active={activity === 'jumbo'} icon={<Drill size={21} />} label="Jumbo" meta="Barrenacion" onClick={() => selectActivity('jumbo')} />
+          <ChoiceButton active={activity === 'maquinaPierna'} icon={<HardHat size={21} />} label="Maquina pierna" meta="Barrenacion" onClick={() => selectActivity('maquinaPierna')} />
+          <ChoiceButton active={activity === 'voladura'} icon={<Activity size={21} />} label="Voladura" meta="Pegada" onClick={() => selectActivity('voladura')} />
+        </div>
+      </QuickSection>
+
+      {activity === 'voladura' ? (
+        <QuickSection title="Produccion" icon={<Activity size={18} />}>
+          <div className="form-grid quick">
+            <Field label="Obra / frente" value={blastRow.obra} onChange={(value) => updateBlast({ obra: value })} required />
+            <Field label="Oficial" value={blastRow.oficial} onChange={(value) => updateBlast({ oficial: value })} />
+            <Field label="Ayudante" value={blastRow.ayudante} onChange={(value) => updateBlast({ ayudante: value })} />
+            <Field label="RPA / Cfte" value={blastRow.rpaCfte} onChange={(value) => updateBlast({ rpaCfte: value })} />
+            <Field label="Barrenos pegados" type="number" value={blastRow.barrenosPegados} onChange={(value) => updateBlast({ barrenosPegados: Number(value) })} />
+            <Field label="Metros pegados" type="number" value={blastRow.metrosPegados} onChange={(value) => updateBlast({ metrosPegados: Number(value) })} />
+            <Field label="Horas servicio" type="number" value={blastRow.horasServicio} onChange={(value) => updateBlast({ horasServicio: Number(value) })} />
+          </div>
+          <details className="quick-details">
+            <summary>Insumos y avance</summary>
+            <div className="form-grid quick">
+              <Field label="Longitud" type="number" value={blastRow.longitud} onChange={(value) => updateBlast({ longitud: Number(value) })} />
+              <Field label="Cuele" type="number" value={blastRow.cuele} onChange={(value) => updateBlast({ cuele: Number(value) })} />
+              <Field label="Desarrollo" type="number" value={blastRow.desarrollo} onChange={(value) => updateBlast({ desarrollo: Number(value) })} />
+              <Field label="ANFO inicial" type="number" value={blastRow.anfoInicial} onChange={(value) => updateBlast({ anfoInicial: Number(value) })} />
+              <Field label="ANFO final" type="number" value={blastRow.anfoFinal} onChange={(value) => updateBlast({ anfoFinal: Number(value) })} />
+            </div>
+          </details>
+          <TextArea label="Observaciones" value={blastRow.observaciones} onChange={(value) => updateBlast({ observaciones: value })} />
+        </QuickSection>
+      ) : (
+        <QuickSection title="Produccion" icon={<Pickaxe size={18} />}>
+          <div className="form-grid quick">
+            <Field label="Equipo" value={drillRow.equipo} options={jumboEquipoOptions} onChange={(value) => updateDrill({ equipo: value })} required />
+            <Field label="Operador" value={drillRow.operador} onChange={(value) => updateDrill({ operador: value })} required />
+            <Field label="Ayudante" value={drillRow.ayudante} onChange={(value) => updateDrill({ ayudante: value })} />
+            <Field label="Nivel / obra" value={drillRow.nivelObra} onChange={(value) => updateDrill({ nivelObra: value })} required />
+            <Field label="RPA / Cfte" value={drillRow.rpaCfte} onChange={(value) => updateDrill({ rpaCfte: value })} />
+            <Field label="Barrenos dados" type="number" value={drillRow.barrenosDados} onChange={(value) => updateDrill({ barrenosDados: Number(value) })} />
+            <Field label="Barrenos cargados" type="number" value={drillRow.barrenosCargados} onChange={(value) => updateDrill({ barrenosCargados: Number(value) })} />
+            <Field label="Metros dados" type="number" value={drillRow.metrosDados} onChange={(value) => updateDrill({ metrosDados: Number(value) })} />
+            <Field label="Horas servicio" type="number" value={drillRow.horasServicio} onChange={(value) => updateDrill({ horasServicio: Number(value) })} />
+          </div>
+          <details className="quick-details">
+            <summary>Horometros e insumos</summary>
+            <div className="form-grid quick">
+              <Field label="Longitud" type="number" value={drillRow.longitud} onChange={(value) => updateDrill({ longitud: Number(value) })} />
+              <Field label="Cuele" type="number" value={drillRow.cuele} onChange={(value) => updateDrill({ cuele: Number(value) })} />
+              <Field label="Desarrollo" type="number" value={drillRow.desarrollo} onChange={(value) => updateDrill({ desarrollo: Number(value) })} />
+              <Field label="Hor. diesel inicial" type="number" value={drillRow.horometroDieselInicial} onChange={(value) => updateDrill({ horometroDieselInicial: Number(value) })} />
+              <Field label="Hor. diesel final" type="number" value={drillRow.horometroDieselFinal} onChange={(value) => updateDrill({ horometroDieselFinal: Number(value) })} />
+              <Field label="Zanco" type="number" value={drillRow.zanco} onChange={(value) => updateDrill({ zanco: Number(value) })} />
+              <Field label="Cople" type="number" value={drillRow.cople} onChange={(value) => updateDrill({ cople: Number(value) })} />
+              <Field label="Barra" type="number" value={drillRow.barra} onChange={(value) => updateDrill({ barra: Number(value) })} />
+              <Field label="Broca" type="number" value={drillRow.broca} onChange={(value) => updateDrill({ broca: Number(value) })} />
+            </div>
+          </details>
+          <TextArea label="Comentarios" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+        </QuickSection>
+      )}
     </>
   )
 }
 
 function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord: (record: RezagadoRecord) => void }) {
+  const equipment = getRezagadoEquipment(record)
+  const scoopRow = record.scoopTram[0] ?? emptyHaulRow(defaultScoop)
+  const retroRow = record.retro[0] ?? emptyRetroRow()
+  const haulActivity = getActiveKey(scoopRow, haulActivityKeys, 'rezagado')
+  const retroActivity = getActiveKey(retroRow, retroActivityKeys, 'amacice')
+
+  function selectEquipment(next: RezagadoEquipment) {
+    setRecord({
+      ...record,
+      scoopTram: next === 'scoop' ? [record.scoopTram[0] ?? emptyHaulRow(defaultScoop)] : [],
+      retro: next === 'retro' ? [record.retro[0] ?? emptyRetroRow()] : [],
+    })
+  }
+
+  function updateScoop(row: HaulRow) {
+    setRecord({ ...record, scoopTram: [row] })
+  }
+
+  function updateRetro(row: RetroRow) {
+    setRecord({ ...record, retro: [row] })
+  }
+
   return (
     <>
-      <PanelTitle title="Reporte Diario de Rezagado" subtitle="Scoop tram, retro, horometros y combustible" />
-      <BaseFields record={record} setRecord={setRecord} />
-      <EditableRows
-        title="Scoop tram"
-        rows={record.scoopTram}
-        onAdd={() => setRecord({ ...record, scoopTram: [...record.scoopTram, emptyHaulRow(defaultScoop)] })}
-        onChange={(scoopTram) => setRecord({ ...record, scoopTram })}
-        fields={haulFields}
-      />
-      <EditableRows
-        title="Retro"
-        rows={record.retro}
-        onAdd={() => setRecord({ ...record, retro: [...record.retro, emptyRetroRow()] })}
-        onChange={(retro) => setRecord({ ...record, retro })}
-        fields={retroFields}
-      />
-      <TextArea label="Observaciones y comentarios" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+      <PanelTitle title="Captura rapida de rezagado" subtitle="Equipo, ubicacion y produccion" />
+      <QuickSection title="Turno" icon={<Mountain size={18} />}>
+        <BaseFields record={record} setRecord={setRecord} />
+      </QuickSection>
+      <QuickSection title="Equipo" icon={<Truck size={18} />}>
+        <div className="quick-choice-grid two">
+          <ChoiceButton active={equipment === 'scoop'} icon={<Truck size={21} />} label="Scoop tram" meta="Rezagado" onClick={() => selectEquipment('scoop')} />
+          <ChoiceButton active={equipment === 'retro'} icon={<HardHat size={21} />} label="Retro" meta="Obra civil" onClick={() => selectEquipment('retro')} />
+        </div>
+        {equipment === 'scoop' ? (
+          <div className="form-grid quick">
+            <Field label="Equipo" value={scoopRow.equipo} options={scoopEquipoOptions} onChange={(value) => updateScoop({ ...scoopRow, equipo: value })} required />
+            <Field label="Operador" value={scoopRow.operador} onChange={(value) => updateScoop({ ...scoopRow, operador: value })} required />
+            <Field label="Nivel / obra" value={scoopRow.nivelObra} onChange={(value) => updateScoop({ ...scoopRow, nivelObra: value })} required />
+            <Field label="Destino" value={scoopRow.destino} onChange={(value) => updateScoop({ ...scoopRow, destino: value })} />
+          </div>
+        ) : (
+          <div className="form-grid quick">
+            <Field label="Equipo" value={retroRow.equipo} options={retroEquipoOptions} onChange={(value) => updateRetro({ ...retroRow, equipo: value })} required />
+            <Field label="Operador" value={retroRow.operador} onChange={(value) => updateRetro({ ...retroRow, operador: value })} required />
+            <Field label="Nivel / obra" value={retroRow.nivelObra} onChange={(value) => updateRetro({ ...retroRow, nivelObra: value })} required />
+          </div>
+        )}
+      </QuickSection>
+      <QuickSection title="Trabajo" icon={<Activity size={18} />}>
+        {equipment === 'scoop' ? (
+          <>
+            <div className="quick-choice-grid compact">
+              {haulActivityKeys.map((key) => (
+                <ChoiceButton
+                  key={key}
+                  active={haulActivity === key}
+                  label={haulActivityLabels[key]}
+                  onClick={() => updateScoop(withSingleMetric(scoopRow, haulActivityKeys, key, Number(scoopRow[haulActivity] || 0)))}
+                />
+              ))}
+            </div>
+            <div className="form-grid quick">
+              <Field label="Cantidad" type="number" value={scoopRow[haulActivity]} onChange={(value) => updateScoop(withSingleMetric(scoopRow, haulActivityKeys, haulActivity, Number(value)))} />
+              <Field label="Camiones" type="number" value={scoopRow.camiones} onChange={(value) => updateScoop({ ...scoopRow, camiones: Number(value) })} />
+              <Field label="Hor. inicial" type="number" value={scoopRow.horometroInicial} onChange={(value) => updateScoop({ ...scoopRow, horometroInicial: Number(value) })} />
+              <Field label="Hor. final" type="number" value={scoopRow.horometroFinal} onChange={(value) => updateScoop({ ...scoopRow, horometroFinal: Number(value) })} />
+              <Field label="Diesel" type="number" value={scoopRow.diesel} onChange={(value) => updateScoop({ ...scoopRow, diesel: Number(value) })} />
+            </div>
+            <TextArea label="Observaciones" value={scoopRow.observaciones} onChange={(value) => updateScoop({ ...scoopRow, observaciones: value })} />
+          </>
+        ) : (
+          <>
+            <div className="quick-choice-grid compact">
+              {retroActivityKeys.map((key) => (
+                <ChoiceButton
+                  key={key}
+                  active={retroActivity === key}
+                  label={retroActivityLabels[key]}
+                  onClick={() => updateRetro(withSingleMetric(retroRow, retroActivityKeys, key, Number(retroRow[retroActivity] || 0)))}
+                />
+              ))}
+            </div>
+            <div className="form-grid quick">
+              <Field label="Cantidad" type="number" value={retroRow[retroActivity]} onChange={(value) => updateRetro(withSingleMetric(retroRow, retroActivityKeys, retroActivity, Number(value)))} />
+              <Field label="Hor. inicial" type="number" value={retroRow.horometroInicial} onChange={(value) => updateRetro({ ...retroRow, horometroInicial: Number(value) })} />
+              <Field label="Hor. final" type="number" value={retroRow.horometroFinal} onChange={(value) => updateRetro({ ...retroRow, horometroFinal: Number(value) })} />
+              <Field label="Diesel" type="number" value={retroRow.diesel} onChange={(value) => updateRetro({ ...retroRow, diesel: Number(value) })} />
+            </div>
+            <TextArea label="Observaciones" value={retroRow.observaciones} onChange={(value) => updateRetro({ ...retroRow, observaciones: value })} />
+          </>
+        )}
+      </QuickSection>
+      <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
     </>
   )
 }
@@ -825,77 +995,63 @@ function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord
 function SeguridadForm({ record, setRecord }: { record: SeguridadRecord; setRecord: (record: SeguridadRecord) => void }) {
   return (
     <>
-      <PanelTitle title="Reporte de Seguridad" subtitle="Eventos, fuerza laboral y actividades preventivas" />
-      <BaseFields record={record} setRecord={setRecord} />
-      <div className="form-grid three">
-        <Field label="Accidentes" type="number" value={record.accidentes} onChange={(value) => setRecord({ ...record, accidentes: Number(value) })} />
-        <Field label="Incidentes" type="number" value={record.incidentes} onChange={(value) => setRecord({ ...record, incidentes: Number(value) })} />
-        <Field label="Fuerza laboral" type="number" value={record.fuerzaLaboral} onChange={(value) => setRecord({ ...record, fuerzaLaboral: Number(value) })} />
-      </div>
-      <TextArea label="Actos inseguros" value={record.actosInseguros} onChange={(value) => setRecord({ ...record, actosInseguros: value })} />
-      <TextArea label="Condiciones inseguras" value={record.condicionesInseguras} onChange={(value) => setRecord({ ...record, condicionesInseguras: value })} />
-      <TextArea label="Platica de seguridad" value={record.platicaSeguridad} onChange={(value) => setRecord({ ...record, platicaSeguridad: value })} />
-      <TextArea label="Actividades de seguridad" value={record.actividadesSeguridad} onChange={(value) => setRecord({ ...record, actividadesSeguridad: value })} />
-      <TextArea label="Correcciones y/o mejoras" value={record.correccionesMejoras} onChange={(value) => setRecord({ ...record, correccionesMejoras: value })} />
-      <TextArea label="Actividades de operacion" value={record.actividadesOperacion} onChange={(value) => setRecord({ ...record, actividadesOperacion: value })} />
-      <TextArea label="Observaciones" value={record.observaciones} onChange={(value) => setRecord({ ...record, observaciones: value })} />
+      <PanelTitle title="Captura rapida de seguridad" subtitle="Eventos y acciones preventivas" />
+      <QuickSection title="Turno" icon={<Mountain size={18} />}>
+        <BaseFields record={record} setRecord={setRecord} />
+      </QuickSection>
+      <QuickSection title="Resumen" icon={<ShieldCheck size={18} />}>
+        <div className="form-grid quick">
+          <Field label="Accidentes" type="number" value={record.accidentes} onChange={(value) => setRecord({ ...record, accidentes: Number(value) })} />
+          <Field label="Incidentes" type="number" value={record.incidentes} onChange={(value) => setRecord({ ...record, incidentes: Number(value) })} />
+          <Field label="Fuerza laboral" type="number" value={record.fuerzaLaboral} onChange={(value) => setRecord({ ...record, fuerzaLaboral: Number(value) })} />
+        </div>
+      </QuickSection>
+      <QuickSection title="Hallazgo" icon={<ClipboardCheck size={18} />}>
+        <TextArea label="Acto o condicion insegura" value={record.actosInseguros} onChange={(value) => setRecord({ ...record, actosInseguros: value })} />
+        <TextArea label="Accion correctiva" value={record.correccionesMejoras} onChange={(value) => setRecord({ ...record, correccionesMejoras: value })} />
+        <details className="quick-details">
+          <summary>Actividades y platica</summary>
+          <TextArea label="Platica de seguridad" value={record.platicaSeguridad} onChange={(value) => setRecord({ ...record, platicaSeguridad: value })} />
+          <TextArea label="Actividades de seguridad" value={record.actividadesSeguridad} onChange={(value) => setRecord({ ...record, actividadesSeguridad: value })} />
+          <TextArea label="Actividades de operacion" value={record.actividadesOperacion} onChange={(value) => setRecord({ ...record, actividadesOperacion: value })} />
+        </details>
+        <TextArea label="Observaciones" value={record.observaciones} onChange={(value) => setRecord({ ...record, observaciones: value })} />
+      </QuickSection>
     </>
   )
 }
 
-function EditableRows<T extends Record<string, string | number>>({
-  title,
-  rows,
-  onAdd,
-  onChange,
-  fields,
-}: {
-  title: string
-  rows: T[]
-  onAdd: () => void
-  onChange: (rows: T[]) => void
-  fields: RowField<T>[]
-}) {
-  function update(index: number, key: keyof T, value: string) {
-    const next = rows.map((row, rowIndex) =>
-      rowIndex === index ? { ...row, [key]: typeof row[key] === 'number' ? Number(value) : value } : row,
-    )
-    onChange(next)
-  }
-
+function QuickSection({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   return (
-    <section className="entry-section">
-      <div className="section-heading">
+    <section className="quick-section">
+      <div className="quick-section-title">
+        <span>{icon}</span>
         <h2>{title}</h2>
-        <button type="button" onClick={onAdd}>
-          <Plus size={16} /> Renglon
-        </button>
       </div>
-      {rows.map((row, index) => (
-        <div className="row-card" key={index}>
-          <div className="row-title">
-            <strong>Registro {index + 1}</strong>
-            {rows.length > 1 && (
-              <button type="button" className="icon-button danger" onClick={() => onChange(rows.filter((_, rowIndex) => rowIndex !== index))}>
-                <Trash2 size={16} />
-              </button>
-            )}
-          </div>
-          <div className="form-grid dense">
-            {fields.map((field) => (
-              <Field
-                key={String(field.key)}
-                label={field.label}
-                type={field.type ?? (typeof row[field.key] === 'number' ? 'number' : 'text')}
-                value={row[field.key]}
-                options={field.options}
-                onChange={(value) => update(index, field.key, value)}
-              />
-            ))}
-          </div>
-        </div>
-      ))}
+      {children}
     </section>
+  )
+}
+
+function ChoiceButton({
+  active,
+  icon,
+  label,
+  meta,
+  onClick,
+}: {
+  active: boolean
+  icon?: ReactNode
+  label: string
+  meta?: string
+  onClick: () => void
+}) {
+  return (
+    <button type="button" className={`choice-button ${active ? 'active' : ''}`} onClick={onClick}>
+      {icon && <span>{icon}</span>}
+      <strong>{label}</strong>
+      {meta && <small>{meta}</small>}
+    </button>
   )
 }
 
@@ -1076,86 +1232,115 @@ function labelType(type: RecordType) {
   }[type]
 }
 
-const drillFields = (options: string[]): RowField<DrillRow>[] => [
-  { key: 'equipo', label: 'Equipo', options },
-  { key: 'operador', label: 'Operador' },
-  { key: 'ayudante', label: 'Ayudante' },
-  { key: 'nivelObra', label: 'Nivel / Obra' },
-  { key: 'rpaCfte', label: 'Rpa/Cfte' },
-  { key: 'longitud', label: 'Longitud' },
-  { key: 'cuele', label: 'Cuele' },
-  { key: 'desarrollo', label: 'Desb/desc/corte' },
-  { key: 'barrenosDados', label: 'Barrenos dados' },
-  { key: 'barrenosCargados', label: 'Barrenos cargados' },
-  { key: 'metrosDados', label: 'Metros dados' },
-  { key: 'horasServicio', label: 'Hrs servicio' },
-  { key: 'zanco', label: 'Zanco' },
-  { key: 'cople', label: 'Cople' },
-  { key: 'barra', label: 'Barra' },
-  { key: 'broca', label: 'Broca' },
-  { key: 'horometroDieselInicial', label: 'Diesel inicial' },
-  { key: 'horometroDieselFinal', label: 'Diesel final' },
-  { key: 'horometroElectInicial', label: 'Elect. inicial' },
-  { key: 'horometroElectFinal', label: 'Elect. final' },
-]
+const haulActivityKeys = ['rezagado', 'traspaleo', 'limpia', 'balastreo', 'planilla', 'relleno'] as const
+const retroActivityKeys = ['amacice', 'reAmacice', 'tableo', 'limpia', 'balastreo', 'mtAcequia'] as const
 
-const blastFields: RowField<BlastRow>[] = [
-  { key: 'obra', label: 'Obra' },
-  { key: 'oficial', label: 'Oficial voladuras' },
-  { key: 'ayudante', label: 'Ayudante' },
-  { key: 'rpaCfte', label: 'Rpa/Cfte' },
-  { key: 'longitud', label: 'Longitud' },
-  { key: 'cuele', label: 'Cuele' },
-  { key: 'desarrollo', label: 'Desb/desc/corte' },
-  { key: 'barrenosPegados', label: 'Barrenos pegados' },
-  { key: 'metrosPegados', label: 'Metros pegados' },
-  { key: 'horasServicio', label: 'Hrs servicio' },
-  { key: 'anfoInicial', label: 'ANFO inicial' },
-  { key: 'anfoFinal', label: 'ANFO final' },
-  { key: 'observaciones', label: 'Observaciones' },
-]
+const haulActivityLabels: Record<HaulActivity, string> = {
+  rezagado: 'Rezagado',
+  traspaleo: 'Traspaleo',
+  limpia: 'Limpia',
+  balastreo: 'Balastreo',
+  planilla: 'Planilla',
+  relleno: 'Relleno',
+}
 
-const haulFields: RowField<HaulRow>[] = [
-  { key: 'equipo', label: 'Equipo', options: scoopEquipoOptions },
-  { key: 'operador', label: 'Operador' },
-  { key: 'nivelObra', label: 'Nivel / Obra' },
-  { key: 'destino', label: 'Destino' },
-  { key: 'rezagado', label: 'Rezagado' },
-  { key: 'traspaleo', label: 'Traspaleo' },
-  { key: 'limpia', label: 'Limpia' },
-  { key: 'balastreo', label: 'Balastreo' },
-  { key: 'planilla', label: 'Planilla' },
-  { key: 'relleno', label: 'Relleno' },
-  { key: 'camiones', label: 'Camiones' },
-  { key: 'horometroInicial', label: 'Hor. inicial' },
-  { key: 'horometroFinal', label: 'Hor. final' },
-  { key: 'diesel', label: 'Diesel' },
-  { key: 'observaciones', label: 'Observaciones' },
-]
+const retroActivityLabels: Record<RetroActivity, string> = {
+  amacice: 'Amacice',
+  reAmacice: 'Re-amacice',
+  tableo: 'Tableo',
+  limpia: 'Limpia',
+  balastreo: 'Balastreo',
+  mtAcequia: 'Mt acequia',
+}
 
-const retroFields: RowField<RetroRow>[] = [
-  { key: 'equipo', label: 'Equipo', options: retroEquipoOptions },
-  { key: 'operador', label: 'Operador' },
-  { key: 'nivelObra', label: 'Nivel / Obra' },
-  { key: 'amacice', label: 'Amacice' },
-  { key: 'reAmacice', label: 'Re-amacice' },
-  { key: 'tableo', label: 'Tableo' },
-  { key: 'limpia', label: 'Limpia' },
-  { key: 'balastreo', label: 'Balastreo' },
-  { key: 'mtAcequia', label: 'MT Acequia' },
-  { key: 'horometroInicial', label: 'Hor. inicial' },
-  { key: 'horometroFinal', label: 'Hor. final' },
-  { key: 'diesel', label: 'Diesel' },
-  { key: 'observaciones', label: 'Observaciones' },
-]
+function hasDrillData(row: DrillRow) {
+  return Boolean(
+    row.operador
+      || row.ayudante
+      || row.nivelObra
+      || row.rpaCfte
+      || row.barrenosDados
+      || row.barrenosCargados
+      || row.metrosDados
+      || row.horasServicio,
+  )
+}
 
-const activityLabels = {
-  polvorero: 'Polvorero',
-  choferCamion: 'Chofer camion personal',
-  choferPipa: 'Chofer pipa',
-  bobCat: 'Bob cat',
-  bombeo: 'Bombeo',
-  servicios: 'Servicios',
+function hasBlastData(row: BlastRow) {
+  return Boolean(
+    row.obra
+      || row.oficial
+      || row.ayudante
+      || row.rpaCfte
+      || row.barrenosPegados
+      || row.metrosPegados
+      || row.horasServicio
+      || row.observaciones,
+  )
+}
+
+function hasHaulData(row: HaulRow) {
+  return Boolean(
+    row.operador
+      || row.nivelObra
+      || row.destino
+      || row.rezagado
+      || row.traspaleo
+      || row.limpia
+      || row.balastreo
+      || row.planilla
+      || row.relleno
+      || row.camiones
+      || row.diesel,
+  )
+}
+
+function hasRetroData(row: RetroRow) {
+  return Boolean(
+    row.operador
+      || row.nivelObra
+      || row.amacice
+      || row.reAmacice
+      || row.tableo
+      || row.limpia
+      || row.balastreo
+      || row.mtAcequia
+      || row.diesel,
+  )
+}
+
+function getBarrenacionActivity(record: BarrenacionRecord): BarrenacionActivity {
+  if (record.voladuras.some(hasBlastData)) return 'voladura'
+  if (record.maquinaPierna.some(hasDrillData)) return 'maquinaPierna'
+  return 'jumbo'
+}
+
+function getRezagadoEquipment(record: RezagadoRecord): RezagadoEquipment {
+  if (record.retro.some(hasRetroData) && !record.scoopTram.some(hasHaulData)) return 'retro'
+  return 'scoop'
+}
+
+function getActiveKey<T extends Record<string, string | number>, K extends keyof T>(
+  row: T,
+  keys: readonly K[],
+  fallback: K,
+) {
+  return keys.find((key) => Number(row[key] || 0) > 0) ?? fallback
+}
+
+function withSingleMetric<T extends Record<string, string | number>, K extends keyof T>(
+  row: T,
+  keys: readonly K[],
+  activeKey: K,
+  value: number,
+) {
+  return keys.reduce(
+    (next, key) => ({
+      ...next,
+      [key]: key === activeKey ? value : 0,
+    }),
+    { ...row },
+  )
 }
 
 export default App
