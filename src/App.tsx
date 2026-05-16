@@ -15,6 +15,7 @@ import {
   MoreVertical,
   Mountain,
   Pickaxe,
+  Plus,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -83,6 +84,7 @@ type BlastRow = {
 }
 
 type HaulRow = {
+  selectedActivities?: HaulActivity[]
   equipo: string
   operador: string
   nivelObra: string
@@ -101,6 +103,7 @@ type HaulRow = {
 }
 
 type RetroRow = {
+  selectedActivities?: RetroActivity[]
   equipo: string
   operador: string
   nivelObra: string
@@ -232,6 +235,7 @@ const emptyBlastRow = (): BlastRow => ({
 })
 
 const emptyHaulRow = (equipo: string): HaulRow => ({
+  selectedActivities: ['rezagado'],
   equipo,
   operador: '',
   nivelObra: '',
@@ -250,6 +254,7 @@ const emptyHaulRow = (equipo: string): HaulRow => ({
 })
 
 const emptyRetroRow = (): RetroRow => ({
+  selectedActivities: ['amacice'],
   equipo: defaultRetro,
   operador: '',
   nivelObra: '',
@@ -988,222 +993,344 @@ function BaseFields<T extends BaseRecord>({
 
 function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; setRecord: (record: BarrenacionRecord) => void }) {
   const activity = getBarrenacionActivity(record)
-  const drillRow =
-    activity === 'maquinaPierna'
-      ? record.maquinaPierna[0] ?? emptyDrillRow(defaultJumbo)
-      : record.jumbo[0] ?? emptyDrillRow(defaultJumbo)
-  const blastRow = record.voladuras[0] ?? emptyBlastRow()
+  const jumboRows = record.jumbo.length ? record.jumbo : [emptyDrillRow(defaultJumbo)]
+  const maquinaRows = record.maquinaPierna.length ? record.maquinaPierna : [emptyDrillRow(defaultJumbo)]
+  const blastRows = record.voladuras.length ? record.voladuras : [emptyBlastRow()]
+  const activeDrillRows = activity === 'maquinaPierna' ? maquinaRows : jumboRows
 
   function selectActivity(next: BarrenacionActivity) {
-    if (next === 'voladura') {
-      setRecord({
-        ...record,
-        activeActivity: next,
-        jumbo: [],
-        maquinaPierna: [],
-        voladuras: [record.voladuras[0] ?? emptyBlastRow()],
-      })
-      return
-    }
-    const currentDrill = (next === 'maquinaPierna' ? record.maquinaPierna[0] : record.jumbo[0])
-      ?? record.jumbo[0]
-      ?? record.maquinaPierna[0]
-      ?? emptyDrillRow(defaultJumbo)
     setRecord({
       ...record,
       activeActivity: next,
-      jumbo: next === 'jumbo' ? [currentDrill] : [],
-      maquinaPierna: next === 'maquinaPierna' ? [currentDrill] : [],
-      voladuras: [],
+      jumbo: next === 'jumbo' && record.jumbo.length === 0 ? [emptyDrillRow(defaultJumbo)] : record.jumbo,
+      maquinaPierna: next === 'maquinaPierna' && record.maquinaPierna.length === 0 ? [emptyDrillRow(defaultJumbo)] : record.maquinaPierna,
+      voladuras: next === 'voladura' && record.voladuras.length === 0 ? [emptyBlastRow()] : record.voladuras,
     })
   }
 
-  function updateDrill(patch: Partial<DrillRow>) {
-    const updated = { ...drillRow, ...patch }
+  function setDrillRows(kind: 'jumbo' | 'maquinaPierna', rows: DrillRow[]) {
     setRecord({
       ...record,
-      activeActivity: activity,
-      jumbo: activity === 'jumbo' ? [updated] : record.jumbo,
-      maquinaPierna: activity === 'maquinaPierna' ? [updated] : record.maquinaPierna,
+      activeActivity: kind,
+      jumbo: kind === 'jumbo' ? rows : record.jumbo,
+      maquinaPierna: kind === 'maquinaPierna' ? rows : record.maquinaPierna,
     })
   }
 
-  function updateBlast(patch: Partial<BlastRow>) {
-    setRecord({ ...record, activeActivity: 'voladura', voladuras: [{ ...blastRow, ...patch }] })
+  function updateDrill(kind: 'jumbo' | 'maquinaPierna', index: number, patch: Partial<DrillRow>) {
+    const rows = kind === 'jumbo' ? jumboRows : maquinaRows
+    setDrillRows(kind, rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)))
+  }
+
+  function addDrill(kind: 'jumbo' | 'maquinaPierna') {
+    const rows = kind === 'jumbo' ? jumboRows : maquinaRows
+    setDrillRows(kind, [...rows, emptyDrillRow(defaultJumbo)])
+  }
+
+  function removeDrill(kind: 'jumbo' | 'maquinaPierna', index: number) {
+    const rows = kind === 'jumbo' ? jumboRows : maquinaRows
+    const nextRows = rows.filter((_, rowIndex) => rowIndex !== index)
+    setDrillRows(kind, nextRows.length ? nextRows : [emptyDrillRow(defaultJumbo)])
+  }
+
+  function updateBlast(index: number, patch: Partial<BlastRow>) {
+    setRecord({
+      ...record,
+      activeActivity: 'voladura',
+      voladuras: blastRows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)),
+    })
+  }
+
+  function addBlast() {
+    setRecord({ ...record, activeActivity: 'voladura', voladuras: [...blastRows, emptyBlastRow()] })
+  }
+
+  function removeBlast(index: number) {
+    const nextRows = blastRows.filter((_, rowIndex) => rowIndex !== index)
+    setRecord({ ...record, activeActivity: 'voladura', voladuras: nextRows.length ? nextRows : [emptyBlastRow()] })
   }
 
   return (
     <>
-      <PanelTitle title="Captura rapida de barrenos" subtitle="Evento corto de campo" />
+      <PanelTitle title="Captura de turno barrenacion y voladuras" subtitle="Varios equipos por supervisor" />
       <QuickSection title="Turno" icon={<Mountain size={18} />}>
         <BaseFields record={record} setRecord={setRecord} />
       </QuickSection>
       <QuickSection title="Actividad" icon={<Drill size={18} />}>
         <div className="quick-choice-grid three">
-          <ChoiceButton active={activity === 'jumbo'} icon={<Drill size={21} />} label="Jumbo" meta="Barrenacion" onClick={() => selectActivity('jumbo')} />
-          <ChoiceButton active={activity === 'maquinaPierna'} icon={<HardHat size={21} />} label="Maquina pierna" meta="Barrenacion" onClick={() => selectActivity('maquinaPierna')} />
-          <ChoiceButton active={activity === 'voladura'} icon={<Activity size={21} />} label="Voladura" meta="Pegada" onClick={() => selectActivity('voladura')} />
+          <ChoiceButton active={activity === 'jumbo'} icon={<Drill size={21} />} label="Jumbo" meta={`${record.jumbo.length || 1} filas`} onClick={() => selectActivity('jumbo')} />
+          <ChoiceButton active={activity === 'maquinaPierna'} icon={<HardHat size={21} />} label="Maquina pierna" meta={`${record.maquinaPierna.length || 1} filas`} onClick={() => selectActivity('maquinaPierna')} />
+          <ChoiceButton active={activity === 'voladura'} icon={<Activity size={21} />} label="Voladura" meta={`${record.voladuras.length || 1} filas`} onClick={() => selectActivity('voladura')} />
         </div>
       </QuickSection>
 
       {activity === 'voladura' ? (
-        <QuickSection title="Produccion" icon={<Activity size={18} />}>
-          <div className="form-grid quick">
-            <Field label="Obra / frente" value={blastRow.obra} onChange={(value) => updateBlast({ obra: value })} required />
-            <Field label="Oficial" value={blastRow.oficial} onChange={(value) => updateBlast({ oficial: value })} />
-            <Field label="Ayudante" value={blastRow.ayudante} onChange={(value) => updateBlast({ ayudante: value })} />
-            <Field label="RPA / Cfte" value={blastRow.rpaCfte} onChange={(value) => updateBlast({ rpaCfte: value })} />
-            <Field label="Barrenos pegados" type="number" value={blastRow.barrenosPegados} onChange={(value) => updateBlast({ barrenosPegados: Number(value) })} />
-            <Field label="Metros pegados" type="number" value={blastRow.metrosPegados} onChange={(value) => updateBlast({ metrosPegados: Number(value) })} />
-            <Field label="Horas servicio" type="number" value={blastRow.horasServicio} onChange={(value) => updateBlast({ horasServicio: Number(value) })} />
+        <QuickSection title="Voladuras del turno" icon={<Activity size={18} />}>
+          <div className="section-heading">
+            <h2>Filas de voladura</h2>
+            <button className="inline-action" type="button" onClick={addBlast}>
+              <Plus size={16} /> Agregar voladura
+            </button>
           </div>
-          <details className="quick-details">
-            <summary>Insumos y avance</summary>
-            <div className="form-grid quick">
-              <Field label="Longitud" type="number" value={blastRow.longitud} onChange={(value) => updateBlast({ longitud: Number(value) })} />
-              <Field label="Cuele" type="number" value={blastRow.cuele} onChange={(value) => updateBlast({ cuele: Number(value) })} />
-              <Field label="Desarrollo" type="number" value={blastRow.desarrollo} onChange={(value) => updateBlast({ desarrollo: Number(value) })} />
-              <Field label="ANFO inicial" type="number" value={blastRow.anfoInicial} onChange={(value) => updateBlast({ anfoInicial: Number(value) })} />
-              <Field label="ANFO final" type="number" value={blastRow.anfoFinal} onChange={(value) => updateBlast({ anfoFinal: Number(value) })} />
-            </div>
-          </details>
-          <TextArea label="Observaciones" value={blastRow.observaciones} onChange={(value) => updateBlast({ observaciones: value })} />
+          {blastRows.map((row, index) => (
+            <article className="row-card" key={`blast-${index}`}>
+              <div className="row-title">
+                <div>
+                  <strong>Voladura {index + 1}</strong>
+                  <small>Se llena en el formato de barrenacion y voladuras</small>
+                </div>
+                <button className="icon-button danger" type="button" onClick={() => removeBlast(index)} aria-label="Eliminar voladura">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+              <div className="form-grid quick">
+                <Field label="Obra / frente" value={row.obra} onChange={(value) => updateBlast(index, { obra: value })} />
+                <Field label="Oficial" value={row.oficial} onChange={(value) => updateBlast(index, { oficial: value })} />
+                <Field label="Ayudante" value={row.ayudante} onChange={(value) => updateBlast(index, { ayudante: value })} />
+                <Field label="RPA / Cfte" value={row.rpaCfte} onChange={(value) => updateBlast(index, { rpaCfte: value })} />
+                <Field label="Barrenos pegados" type="number" value={row.barrenosPegados} onChange={(value) => updateBlast(index, { barrenosPegados: Number(value) })} />
+                <Field label="Metros pegados" type="number" value={row.metrosPegados} onChange={(value) => updateBlast(index, { metrosPegados: Number(value) })} />
+                <Field label="Horas servicio" type="number" value={row.horasServicio} onChange={(value) => updateBlast(index, { horasServicio: Number(value) })} />
+              </div>
+              <details className="quick-details">
+                <summary>Insumos y avance</summary>
+                <div className="form-grid quick">
+                  <Field label="Longitud" type="number" value={row.longitud} onChange={(value) => updateBlast(index, { longitud: Number(value) })} />
+                  <Field label="Cuele" type="number" value={row.cuele} onChange={(value) => updateBlast(index, { cuele: Number(value) })} />
+                  <Field label="Desarrollo" type="number" value={row.desarrollo} onChange={(value) => updateBlast(index, { desarrollo: Number(value) })} />
+                  <Field label="ANFO inicial" type="number" value={row.anfoInicial} onChange={(value) => updateBlast(index, { anfoInicial: Number(value) })} />
+                  <Field label="ANFO final" type="number" value={row.anfoFinal} onChange={(value) => updateBlast(index, { anfoFinal: Number(value) })} />
+                </div>
+              </details>
+              <TextArea label="Observaciones" value={row.observaciones} onChange={(value) => updateBlast(index, { observaciones: value })} />
+            </article>
+          ))}
         </QuickSection>
       ) : (
-        <QuickSection title="Produccion" icon={<Pickaxe size={18} />}>
-          <div className="form-grid quick">
-            <Field label="Equipo" value={drillRow.equipo} options={jumboEquipoOptions} onChange={(value) => updateDrill({ equipo: value })} required />
-            <Field label="Operador" value={drillRow.operador} onChange={(value) => updateDrill({ operador: value })} required />
-            <Field label="Ayudante" value={drillRow.ayudante} onChange={(value) => updateDrill({ ayudante: value })} />
-            <Field label="Nivel / obra" value={drillRow.nivelObra} onChange={(value) => updateDrill({ nivelObra: value })} required />
-            <Field label="RPA / Cfte" value={drillRow.rpaCfte} onChange={(value) => updateDrill({ rpaCfte: value })} />
-            <Field label="Barrenos dados" type="number" value={drillRow.barrenosDados} onChange={(value) => updateDrill({ barrenosDados: Number(value) })} />
-            <Field label="Barrenos cargados" type="number" value={drillRow.barrenosCargados} onChange={(value) => updateDrill({ barrenosCargados: Number(value) })} />
-            <Field label="Metros dados" type="number" value={drillRow.metrosDados} onChange={(value) => updateDrill({ metrosDados: Number(value) })} />
-            <Field label="Horas servicio" type="number" value={drillRow.horasServicio} onChange={(value) => updateDrill({ horasServicio: Number(value) })} />
+        <QuickSection title={activity === 'jumbo' ? 'Jumbos del turno' : 'Maquina pierna del turno'} icon={<Pickaxe size={18} />}>
+          <div className="section-heading">
+            <h2>{activity === 'jumbo' ? 'Filas de jumbo' : 'Filas de maquina pierna'}</h2>
+            <button className="inline-action" type="button" onClick={() => addDrill(activity)}>
+              <Plus size={16} /> Agregar equipo
+            </button>
           </div>
-          <details className="quick-details">
-            <summary>Horometros e insumos</summary>
-            <div className="form-grid quick">
-              <Field label="Longitud" type="number" value={drillRow.longitud} onChange={(value) => updateDrill({ longitud: Number(value) })} />
-              <Field label="Cuele" type="number" value={drillRow.cuele} onChange={(value) => updateDrill({ cuele: Number(value) })} />
-              <Field label="Desarrollo" type="number" value={drillRow.desarrollo} onChange={(value) => updateDrill({ desarrollo: Number(value) })} />
-              <Field label="Hor. diesel inicial" type="number" value={drillRow.horometroDieselInicial} onChange={(value) => updateDrill({ horometroDieselInicial: Number(value) })} />
-              <Field label="Hor. diesel final" type="number" value={drillRow.horometroDieselFinal} onChange={(value) => updateDrill({ horometroDieselFinal: Number(value) })} />
-              <Field label="Zanco" type="number" value={drillRow.zanco} onChange={(value) => updateDrill({ zanco: Number(value) })} />
-              <Field label="Cople" type="number" value={drillRow.cople} onChange={(value) => updateDrill({ cople: Number(value) })} />
-              <Field label="Barra" type="number" value={drillRow.barra} onChange={(value) => updateDrill({ barra: Number(value) })} />
-              <Field label="Broca" type="number" value={drillRow.broca} onChange={(value) => updateDrill({ broca: Number(value) })} />
-            </div>
-          </details>
-          <TextArea label="Comentarios" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+          {activeDrillRows.map((row, index) => (
+            <article className="row-card" key={`${activity}-${index}`}>
+              <div className="row-title">
+                <div>
+                  <strong>{activity === 'jumbo' ? 'Jumbo' : 'Maquina pierna'} {index + 1}</strong>
+                  <small>Un equipo o frente trabajado durante el turno</small>
+                </div>
+                <button className="icon-button danger" type="button" onClick={() => removeDrill(activity, index)} aria-label="Eliminar equipo">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+              <div className="form-grid quick">
+                <Field label="Equipo" value={row.equipo} options={jumboEquipoOptions} onChange={(value) => updateDrill(activity, index, { equipo: value })} />
+                <Field label="Operador" value={row.operador} onChange={(value) => updateDrill(activity, index, { operador: value })} />
+                <Field label="Ayudante" value={row.ayudante} onChange={(value) => updateDrill(activity, index, { ayudante: value })} />
+                <Field label="Nivel / obra" value={row.nivelObra} onChange={(value) => updateDrill(activity, index, { nivelObra: value })} />
+                <Field label="RPA / Cfte" value={row.rpaCfte} onChange={(value) => updateDrill(activity, index, { rpaCfte: value })} />
+                <Field label="Barrenos dados" type="number" value={row.barrenosDados} onChange={(value) => updateDrill(activity, index, { barrenosDados: Number(value) })} />
+                <Field label="Barrenos cargados" type="number" value={row.barrenosCargados} onChange={(value) => updateDrill(activity, index, { barrenosCargados: Number(value) })} />
+                <Field label="Metros dados" type="number" value={row.metrosDados} onChange={(value) => updateDrill(activity, index, { metrosDados: Number(value) })} />
+                <Field label="Horas servicio" type="number" value={row.horasServicio} onChange={(value) => updateDrill(activity, index, { horasServicio: Number(value) })} />
+              </div>
+              <details className="quick-details">
+                <summary>Horometros e insumos</summary>
+                <div className="form-grid quick">
+                  <Field label="Longitud" type="number" value={row.longitud} onChange={(value) => updateDrill(activity, index, { longitud: Number(value) })} />
+                  <Field label="Cuele" type="number" value={row.cuele} onChange={(value) => updateDrill(activity, index, { cuele: Number(value) })} />
+                  <Field label="Desarrollo" type="number" value={row.desarrollo} onChange={(value) => updateDrill(activity, index, { desarrollo: Number(value) })} />
+                  <Field label="Hor. diesel inicial" type="number" value={row.horometroDieselInicial} onChange={(value) => updateDrill(activity, index, { horometroDieselInicial: Number(value) })} />
+                  <Field label="Hor. diesel final" type="number" value={row.horometroDieselFinal} onChange={(value) => updateDrill(activity, index, { horometroDieselFinal: Number(value) })} />
+                  <Field label="Hor. elect inicial" type="number" value={row.horometroElectInicial} onChange={(value) => updateDrill(activity, index, { horometroElectInicial: Number(value) })} />
+                  <Field label="Hor. elect final" type="number" value={row.horometroElectFinal} onChange={(value) => updateDrill(activity, index, { horometroElectFinal: Number(value) })} />
+                  <Field label="Zanco" type="number" value={row.zanco} onChange={(value) => updateDrill(activity, index, { zanco: Number(value) })} />
+                  <Field label="Cople" type="number" value={row.cople} onChange={(value) => updateDrill(activity, index, { cople: Number(value) })} />
+                  <Field label="Barra" type="number" value={row.barra} onChange={(value) => updateDrill(activity, index, { barra: Number(value) })} />
+                  <Field label="Broca" type="number" value={row.broca} onChange={(value) => updateDrill(activity, index, { broca: Number(value) })} />
+                </div>
+              </details>
+            </article>
+          ))}
         </QuickSection>
       )}
+
+      <QuickSection title="Apoyo y cierre del turno" icon={<ClipboardCheck size={18} />}>
+        <div className="form-grid quick">
+          <Field label="Polvorero" value={record.polvorero} onChange={(value) => setRecord({ ...record, polvorero: value })} />
+          <Field label="Chofer camion personal" value={record.choferCamion} onChange={(value) => setRecord({ ...record, choferCamion: value })} />
+          <Field label="Chofer pipa" value={record.choferPipa} onChange={(value) => setRecord({ ...record, choferPipa: value })} />
+          <Field label="Bob cat" value={record.bobCat} onChange={(value) => setRecord({ ...record, bobCat: value })} />
+          <Field label="Bombeo" value={record.bombeo} onChange={(value) => setRecord({ ...record, bombeo: value })} />
+          <Field label="Servicios" value={record.servicios} onChange={(value) => setRecord({ ...record, servicios: value })} />
+        </div>
+        <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+        <TextArea label="Inasistencias / permisos" value={record.inasistencias} onChange={(value) => setRecord({ ...record, inasistencias: value })} />
+      </QuickSection>
     </>
   )
 }
 
 function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord: (record: RezagadoRecord) => void }) {
   const equipment = getRezagadoEquipment(record)
-  const scoopRow = record.scoopTram[0] ?? emptyHaulRow(defaultScoop)
-  const retroRow = record.retro[0] ?? emptyRetroRow()
-  const haulActivity = getHaulActivity(record, scoopRow)
-  const retroActivity = getRetroActivity(record, retroRow)
+  const scoopRows = record.scoopTram.length ? record.scoopTram : [emptyHaulRow(defaultScoop)]
+  const retroRows = record.retro.length ? record.retro : [emptyRetroRow()]
 
   function selectEquipment(next: RezagadoEquipment) {
     setRecord({
       ...record,
       activeEquipment: next,
-      scoopTram: next === 'scoop' ? [record.scoopTram[0] ?? emptyHaulRow(defaultScoop)] : [],
-      retro: next === 'retro' ? [record.retro[0] ?? emptyRetroRow()] : [],
+      scoopTram: next === 'scoop' && record.scoopTram.length === 0 ? [emptyHaulRow(defaultScoop)] : record.scoopTram,
+      retro: next === 'retro' && record.retro.length === 0 ? [emptyRetroRow()] : record.retro,
     })
   }
 
-  function updateScoop(row: HaulRow, activeActivity = haulActivity) {
-    setRecord({
-      ...record,
-      activeEquipment: 'scoop',
-      activeHaulActivity: activeActivity,
-      scoopTram: [row],
-    })
+  function setScoopRows(rows: HaulRow[]) {
+    setRecord({ ...record, activeEquipment: 'scoop', scoopTram: rows.length ? rows : [emptyHaulRow(defaultScoop)] })
   }
 
-  function updateRetro(row: RetroRow, activeActivity = retroActivity) {
-    setRecord({
-      ...record,
-      activeEquipment: 'retro',
-      activeRetroActivity: activeActivity,
-      retro: [row],
-    })
+  function setRetroRows(rows: RetroRow[]) {
+    setRecord({ ...record, activeEquipment: 'retro', retro: rows.length ? rows : [emptyRetroRow()] })
+  }
+
+  function updateScoopRow(index: number, patch: Partial<HaulRow>) {
+    setScoopRows(scoopRows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)))
+  }
+
+  function updateRetroRow(index: number, patch: Partial<RetroRow>) {
+    setRetroRows(retroRows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)))
+  }
+
+  function toggleScoopActivity(index: number, key: HaulActivity) {
+    const row = scoopRows[index]
+    const selected = getSelectedHaulActivities(row)
+    const nextSelected = selected.includes(key) ? selected.filter((item) => item !== key) : [...selected, key]
+    if (nextSelected.length === 0) return
+    updateScoopRow(index, { selectedActivities: nextSelected, [key]: nextSelected.includes(key) ? row[key] : 0 } as Partial<HaulRow>)
+  }
+
+  function toggleRetroActivity(index: number, key: RetroActivity) {
+    const row = retroRows[index]
+    const selected = getSelectedRetroActivities(row)
+    const nextSelected = selected.includes(key) ? selected.filter((item) => item !== key) : [...selected, key]
+    if (nextSelected.length === 0) return
+    updateRetroRow(index, { selectedActivities: nextSelected, [key]: nextSelected.includes(key) ? row[key] : 0 } as Partial<RetroRow>)
   }
 
   return (
     <>
-      <PanelTitle title="Captura rapida de rezagado" subtitle="Equipo, ubicacion y produccion" />
+      <PanelTitle title="Captura de turno rezagado" subtitle="Varios equipos y actividades" />
       <QuickSection title="Turno" icon={<Mountain size={18} />}>
         <BaseFields record={record} setRecord={setRecord} />
       </QuickSection>
       <QuickSection title="Equipo" icon={<Truck size={18} />}>
         <div className="quick-choice-grid two">
-          <ChoiceButton active={equipment === 'scoop'} icon={<Truck size={21} />} label="Scoop tram" meta="Rezagado" onClick={() => selectEquipment('scoop')} />
-          <ChoiceButton active={equipment === 'retro'} icon={<HardHat size={21} />} label="Retro" meta="Obra civil" onClick={() => selectEquipment('retro')} />
+          <ChoiceButton active={equipment === 'scoop'} icon={<Truck size={21} />} label="Scoop tram" meta={`${record.scoopTram.length || 1} filas`} onClick={() => selectEquipment('scoop')} />
+          <ChoiceButton active={equipment === 'retro'} icon={<HardHat size={21} />} label="Retro" meta={`${record.retro.length || 1} filas`} onClick={() => selectEquipment('retro')} />
         </div>
-        {equipment === 'scoop' ? (
-          <div className="form-grid quick">
-            <Field label="Equipo" value={scoopRow.equipo} options={scoopEquipoOptions} onChange={(value) => updateScoop({ ...scoopRow, equipo: value })} required />
-            <Field label="Operador" value={scoopRow.operador} onChange={(value) => updateScoop({ ...scoopRow, operador: value })} required />
-            <Field label="Nivel / obra" value={scoopRow.nivelObra} onChange={(value) => updateScoop({ ...scoopRow, nivelObra: value })} required />
-            <Field label="Destino" value={scoopRow.destino} onChange={(value) => updateScoop({ ...scoopRow, destino: value })} />
-          </div>
-        ) : (
-          <div className="form-grid quick">
-            <Field label="Equipo" value={retroRow.equipo} options={retroEquipoOptions} onChange={(value) => updateRetro({ ...retroRow, equipo: value })} required />
-            <Field label="Operador" value={retroRow.operador} onChange={(value) => updateRetro({ ...retroRow, operador: value })} required />
-            <Field label="Nivel / obra" value={retroRow.nivelObra} onChange={(value) => updateRetro({ ...retroRow, nivelObra: value })} required />
-          </div>
-        )}
       </QuickSection>
       <QuickSection title="Trabajo" icon={<Activity size={18} />}>
         {equipment === 'scoop' ? (
           <>
-            <div className="quick-choice-grid compact">
-              {haulActivityKeys.map((key) => (
-                <ChoiceButton
-                  key={key}
-                  active={haulActivity === key}
-                  label={haulActivityLabels[key]}
-                  onClick={() => updateScoop(withSingleMetric(scoopRow, haulActivityKeys, key, Number(scoopRow[haulActivity] || 0)), key)}
-                />
-              ))}
+            <div className="section-heading">
+              <h2>Scoop tram del turno</h2>
+              <button className="inline-action" type="button" onClick={() => setScoopRows([...scoopRows, emptyHaulRow(defaultScoop)])}>
+                <Plus size={16} /> Agregar equipo
+              </button>
             </div>
-            <div className="form-grid quick">
-              <Field label="Cantidad" type="number" value={scoopRow[haulActivity]} onChange={(value) => updateScoop(withSingleMetric(scoopRow, haulActivityKeys, haulActivity, Number(value)), haulActivity)} />
-              <Field label="Camiones" type="number" value={scoopRow.camiones} onChange={(value) => updateScoop({ ...scoopRow, camiones: Number(value) })} />
-              <Field label="Hor. inicial" type="number" value={scoopRow.horometroInicial} onChange={(value) => updateScoop({ ...scoopRow, horometroInicial: Number(value) })} />
-              <Field label="Hor. final" type="number" value={scoopRow.horometroFinal} onChange={(value) => updateScoop({ ...scoopRow, horometroFinal: Number(value) })} />
-              <Field label="Diesel" type="number" value={scoopRow.diesel} onChange={(value) => updateScoop({ ...scoopRow, diesel: Number(value) })} />
-            </div>
-            <TextArea label="Observaciones" value={scoopRow.observaciones} onChange={(value) => updateScoop({ ...scoopRow, observaciones: value })} />
+            {scoopRows.map((row, index) => {
+              const selectedActivities = getSelectedHaulActivities(row)
+              return (
+                <article className="row-card" key={`scoop-${index}`}>
+                  <div className="row-title">
+                    <div>
+                      <strong>Scoop tram {index + 1}</strong>
+                      <small>Selecciona todas las actividades realizadas por este equipo</small>
+                    </div>
+                    <button className="icon-button danger" type="button" onClick={() => setScoopRows(scoopRows.filter((_, rowIndex) => rowIndex !== index))} aria-label="Eliminar scoop">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                  <div className="form-grid quick">
+                    <Field label="Equipo" value={row.equipo} options={scoopEquipoOptions} onChange={(value) => updateScoopRow(index, { equipo: value })} />
+                    <Field label="Operador" value={row.operador} onChange={(value) => updateScoopRow(index, { operador: value })} />
+                    <Field label="Nivel / obra" value={row.nivelObra} onChange={(value) => updateScoopRow(index, { nivelObra: value })} />
+                    <Field label="Destino" value={row.destino} onChange={(value) => updateScoopRow(index, { destino: value })} />
+                  </div>
+                  <div className="quick-choice-grid compact multi-choice-grid">
+                    {haulActivityKeys.map((key) => (
+                      <ChoiceButton
+                        key={key}
+                        active={selectedActivities.includes(key)}
+                        label={haulActivityLabels[key]}
+                        onClick={() => toggleScoopActivity(index, key)}
+                      />
+                    ))}
+                  </div>
+                  <div className="form-grid quick">
+                    {selectedActivities.map((key) => (
+                      <Field key={key} label={`Cantidad ${haulActivityLabels[key]}`} type="number" value={row[key]} onChange={(value) => updateScoopRow(index, { [key]: Number(value) } as Partial<HaulRow>)} />
+                    ))}
+                    <Field label="Camiones" type="number" value={row.camiones} onChange={(value) => updateScoopRow(index, { camiones: Number(value) })} />
+                    <Field label="Hor. inicial" type="number" value={row.horometroInicial} onChange={(value) => updateScoopRow(index, { horometroInicial: Number(value) })} />
+                    <Field label="Hor. final" type="number" value={row.horometroFinal} onChange={(value) => updateScoopRow(index, { horometroFinal: Number(value) })} />
+                    <Field label="Diesel" type="number" value={row.diesel} onChange={(value) => updateScoopRow(index, { diesel: Number(value) })} />
+                  </div>
+                  <TextArea label="Observaciones" value={row.observaciones} onChange={(value) => updateScoopRow(index, { observaciones: value })} />
+                </article>
+              )
+            })}
           </>
         ) : (
           <>
-            <div className="quick-choice-grid compact">
-              {retroActivityKeys.map((key) => (
-                <ChoiceButton
-                  key={key}
-                  active={retroActivity === key}
-                  label={retroActivityLabels[key]}
-                  onClick={() => updateRetro(withSingleMetric(retroRow, retroActivityKeys, key, Number(retroRow[retroActivity] || 0)), key)}
-                />
-              ))}
+            <div className="section-heading">
+              <h2>Retro del turno</h2>
+              <button className="inline-action" type="button" onClick={() => setRetroRows([...retroRows, emptyRetroRow()])}>
+                <Plus size={16} /> Agregar equipo
+              </button>
             </div>
-            <div className="form-grid quick">
-              <Field label="Cantidad" type="number" value={retroRow[retroActivity]} onChange={(value) => updateRetro(withSingleMetric(retroRow, retroActivityKeys, retroActivity, Number(value)), retroActivity)} />
-              <Field label="Hor. inicial" type="number" value={retroRow.horometroInicial} onChange={(value) => updateRetro({ ...retroRow, horometroInicial: Number(value) })} />
-              <Field label="Hor. final" type="number" value={retroRow.horometroFinal} onChange={(value) => updateRetro({ ...retroRow, horometroFinal: Number(value) })} />
-              <Field label="Diesel" type="number" value={retroRow.diesel} onChange={(value) => updateRetro({ ...retroRow, diesel: Number(value) })} />
-            </div>
-            <TextArea label="Observaciones" value={retroRow.observaciones} onChange={(value) => updateRetro({ ...retroRow, observaciones: value })} />
+            {retroRows.map((row, index) => {
+              const selectedActivities = getSelectedRetroActivities(row)
+              return (
+                <article className="row-card" key={`retro-${index}`}>
+                  <div className="row-title">
+                    <div>
+                      <strong>Retro {index + 1}</strong>
+                      <small>Selecciona todas las actividades realizadas por este equipo</small>
+                    </div>
+                    <button className="icon-button danger" type="button" onClick={() => setRetroRows(retroRows.filter((_, rowIndex) => rowIndex !== index))} aria-label="Eliminar retro">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                  <div className="form-grid quick">
+                    <Field label="Equipo" value={row.equipo} options={retroEquipoOptions} onChange={(value) => updateRetroRow(index, { equipo: value })} />
+                    <Field label="Operador" value={row.operador} onChange={(value) => updateRetroRow(index, { operador: value })} />
+                    <Field label="Nivel / obra" value={row.nivelObra} onChange={(value) => updateRetroRow(index, { nivelObra: value })} />
+                  </div>
+                  <div className="quick-choice-grid compact multi-choice-grid">
+                    {retroActivityKeys.map((key) => (
+                      <ChoiceButton
+                        key={key}
+                        active={selectedActivities.includes(key)}
+                        label={retroActivityLabels[key]}
+                        onClick={() => toggleRetroActivity(index, key)}
+                      />
+                    ))}
+                  </div>
+                  <div className="form-grid quick">
+                    {selectedActivities.map((key) => (
+                      <Field key={key} label={`Cantidad ${retroActivityLabels[key]}`} type="number" value={row[key]} onChange={(value) => updateRetroRow(index, { [key]: Number(value) } as Partial<RetroRow>)} />
+                    ))}
+                    <Field label="Hor. inicial" type="number" value={row.horometroInicial} onChange={(value) => updateRetroRow(index, { horometroInicial: Number(value) })} />
+                    <Field label="Hor. final" type="number" value={row.horometroFinal} onChange={(value) => updateRetroRow(index, { horometroFinal: Number(value) })} />
+                    <Field label="Diesel" type="number" value={row.diesel} onChange={(value) => updateRetroRow(index, { diesel: Number(value) })} />
+                  </div>
+                  <TextArea label="Observaciones" value={row.observaciones} onChange={(value) => updateRetroRow(index, { observaciones: value })} />
+                </article>
+              )
+            })}
           </>
         )}
       </QuickSection>
@@ -2160,6 +2287,20 @@ function getRetroActivity(record: RezagadoRecord, row: RetroRow): RetroActivity 
   return getActiveKey(row, retroActivityKeys, 'amacice')
 }
 
+function getSelectedHaulActivities(row: HaulRow): HaulActivity[] {
+  const stored = (row.selectedActivities ?? []).filter(isHaulActivity)
+  const withValues = haulActivityKeys.filter((key) => Number(row[key] || 0) > 0)
+  const selected = Array.from(new Set<HaulActivity>([...stored, ...withValues]))
+  return selected.length ? selected : ['rezagado']
+}
+
+function getSelectedRetroActivities(row: RetroRow): RetroActivity[] {
+  const stored = (row.selectedActivities ?? []).filter(isRetroActivity)
+  const withValues = retroActivityKeys.filter((key) => Number(row[key] || 0) > 0)
+  const selected = Array.from(new Set<RetroActivity>([...stored, ...withValues]))
+  return selected.length ? selected : ['amacice']
+}
+
 function isBarrenacionActivity(value: unknown): value is BarrenacionActivity {
   return barrenacionActivities.includes(value as BarrenacionActivity)
 }
@@ -2176,27 +2317,12 @@ function isRetroActivity(value: unknown): value is RetroActivity {
   return retroActivityKeys.includes(value as RetroActivity)
 }
 
-function getActiveKey<T extends Record<string, string | number>, K extends keyof T>(
+function getActiveKey<T, K extends keyof T>(
   row: T,
   keys: readonly K[],
   fallback: K,
 ) {
   return keys.find((key) => Number(row[key] || 0) > 0) ?? fallback
-}
-
-function withSingleMetric<T extends Record<string, string | number>, K extends keyof T>(
-  row: T,
-  keys: readonly K[],
-  activeKey: K,
-  value: number,
-) {
-  return keys.reduce(
-    (next, key) => ({
-      ...next,
-      [key]: key === activeKey ? value : 0,
-    }),
-    { ...row },
-  )
 }
 
 export default App

@@ -881,6 +881,7 @@ textarea:focus {
 .section-heading {
   justify-content: space-between;
   margin-bottom: 10px;
+  gap: 12px;
 }
 
 .section-heading h2,
@@ -902,8 +903,37 @@ textarea:focus {
 
 .row-title {
   justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
   color: #253544;
   margin-bottom: 12px;
+}
+
+.row-title > div {
+  display: grid;
+  gap: 3px;
+}
+
+.row-title small {
+  color: #697783;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inline-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  white-space: nowrap;
+}
+
+.multi-choice-grid {
+  margin-top: 12px;
+}
+
+.multi-choice-grid .choice-button {
+  min-height: 64px;
 }
 
 .icon-button {
@@ -1289,6 +1319,15 @@ th {
 
   .edit-banner span,
   .edit-banner button {
+    width: 100%;
+  }
+
+  .section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inline-action {
     width: 100%;
   }
 
