@@ -3,6 +3,7 @@ import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import {
   Activity,
   BarChart3,
+  Bell,
   ClipboardCheck,
   Drill,
   Edit3,
@@ -12,12 +13,14 @@ import {
   History,
   LayoutDashboard,
   Menu,
+  MessageSquare,
   MoreVertical,
   Mountain,
   Pickaxe,
   Plus,
   RefreshCw,
   Save,
+  Send,
   ShieldCheck,
   Trash2,
   Truck,
@@ -43,6 +46,7 @@ type BarrenacionActivity = 'jumbo' | 'maquinaPierna' | 'voladura'
 type RezagadoEquipment = 'scoop' | 'retro'
 type HaulActivity = 'rezagado' | 'traspaleo' | 'limpia' | 'balastreo' | 'planilla' | 'relleno'
 type RetroActivity = 'amacice' | 'reAmacice' | 'tableo' | 'limpia' | 'balastreo' | 'mtAcequia'
+type ChatMessageType = 'aviso' | 'mensaje' | 'urgente'
 
 type DrillRow = {
   equipo: string
@@ -174,7 +178,18 @@ type SeguridadRecord = BaseRecord & {
 
 type MineRecord = BarrenacionRecord | RezagadoRecord | SeguridadRecord
 
+type ChatMessage = {
+  id: string
+  type: ChatMessageType
+  author: string
+  text: string
+  createdAt: string
+  updatedAt: string
+  syncedAt?: string
+}
+
 const STORAGE_KEY = 'mga-bitacora-operaciones-v1'
+const MESSAGE_STORAGE_KEY = 'mga-bitacora-messages-v1'
 const API_URL_KEY = 'mga-bitacora-api-url'
 const DEFAULT_API_URL = 'https://mga-bitacora-mina.onrender.com'
 const BARRENACION_TEMPLATE = '/templates/barrenacion-voladuras.pdf'
@@ -338,6 +353,10 @@ function App() {
   const [rezagado, setRezagado] = useState<RezagadoRecord>(makeRezagado)
   const [seguridad, setSeguridad] = useState<SeguridadRecord>(makeSeguridad)
   const [records, setRecords] = useState<MineRecord[]>(loadRecords)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(loadChatMessages)
+  const [chatType, setChatType] = useState<ChatMessageType>('aviso')
+  const [chatAuthor, setChatAuthor] = useState('')
+  const [chatText, setChatText] = useState('')
   const [query, setQuery] = useState('')
   const [message, setMessage] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -373,6 +392,11 @@ function App() {
     () => records.filter((record) => record.updatedAt !== record.syncedAt).length,
     [records],
   )
+  const pendingMessages = useMemo(
+    () => chatMessages.filter((item) => item.updatedAt !== item.syncedAt).length,
+    [chatMessages],
+  )
+  const latestMessages = useMemo(() => chatMessages.slice(0, 8), [chatMessages])
 
   useEffect(() => {
     localStorage.setItem(API_URL_KEY, apiUrl)
@@ -380,7 +404,11 @@ function App() {
 
   useEffect(() => {
     void syncRecords({ silent: true })
-    const handleOnline = () => void syncRecords({ silent: true })
+    void syncMessages({ silent: true })
+    const handleOnline = () => {
+      void syncRecords({ silent: true })
+      void syncMessages({ silent: true })
+    }
     window.addEventListener('online', handleOnline)
     return () => window.removeEventListener('online', handleOnline)
     // The initial sync must run once on startup; saves trigger their own sync with fresh records.
@@ -403,6 +431,59 @@ function App() {
     setRecords(normalized)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
     return normalized
+  }
+
+  function persistMessages(next: ChatMessage[]) {
+    const normalized = mergeChatMessages(next.map(normalizeChatMessage))
+    setChatMessages(normalized)
+    localStorage.setItem(MESSAGE_STORAGE_KEY, JSON.stringify(normalized))
+    return normalized
+  }
+
+  function sendChatMessage(event: FormEvent) {
+    event.preventDefault()
+    const text = chatText.trim()
+    if (!text) return
+    const now = nowIso()
+    const nextMessage = normalizeChatMessage({
+      id: crypto.randomUUID(),
+      type: chatType,
+      author: chatAuthor.trim() || 'Operacion',
+      text,
+      createdAt: now,
+      updatedAt: now,
+    })
+    const persisted = persistMessages([nextMessage, ...chatMessages])
+    setChatText('')
+    setMessage('Mensaje guardado y listo para sincronizar.')
+    void syncMessages({ silent: true, sourceMessages: persisted })
+  }
+
+  async function syncMessages(options: { silent?: boolean; sourceMessages?: ChatMessage[] } = {}) {
+    const apiBase = resolveApiBase(apiUrl)
+    if (!apiBase || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      if (!options.silent) setMessage('Sin internet. Los mensajes se enviaran automaticamente.')
+      return
+    }
+    try {
+      const localMessages = (options.sourceMessages ?? chatMessages).map(normalizeChatMessage)
+      const response = await fetch(`${apiBase}/api/messages/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: localMessages }),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const payload = (await response.json()) as { messages: ChatMessage[] }
+      persistMessages(
+        mergeChatMessages([...localMessages, ...payload.messages.map(normalizeChatMessage)]).map((item) => ({
+          ...item,
+          syncedAt: item.updatedAt,
+        })),
+      )
+      if (!options.silent) setMessage('Centro de mensajes sincronizado.')
+    } catch {
+      if (!options.silent) setMessage('No se pudieron sincronizar los mensajes. Se reintentara automaticamente.')
+    }
   }
 
   function saveRecord(event: FormEvent) {
@@ -849,6 +930,68 @@ function App() {
               </button>
             </div>
           </div>
+
+          <section className="message-center" data-html2canvas-ignore="true">
+            <div className="message-head">
+              <div>
+                <span><MessageSquare size={18} /> Centro de mensajes</span>
+                <h2>Avisos y comunicados</h2>
+              </div>
+              <button type="button" onClick={() => void syncMessages()} disabled={syncing}>
+                <RefreshCw size={16} className={syncing ? 'spin' : ''} />
+                {pendingMessages > 0 ? `${pendingMessages} pendientes` : 'Al dia'}
+              </button>
+            </div>
+            <form className="message-composer" onSubmit={sendChatMessage}>
+              <div className="message-type-tabs" aria-label="Tipo de mensaje">
+                {(['aviso', 'mensaje', 'urgente'] as const).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    className={chatType === type ? 'active' : ''}
+                    onClick={() => setChatType(type)}
+                  >
+                    {type === 'aviso' && <Bell size={16} />}
+                    {type === 'mensaje' && <MessageSquare size={16} />}
+                    {type === 'urgente' && <ShieldCheck size={16} />}
+                    {labelChatType(type)}
+                  </button>
+                ))}
+              </div>
+              <input
+                aria-label="Nombre de quien envia"
+                placeholder="Nombre"
+                value={chatAuthor}
+                onChange={(event) => setChatAuthor(event.target.value)}
+              />
+              <textarea
+                aria-label="Mensaje"
+                placeholder="Escribe un aviso para el equipo..."
+                value={chatText}
+                onChange={(event) => setChatText(event.target.value)}
+                rows={3}
+              />
+              <button className="send-message" type="submit">
+                <Send size={17} /> Publicar
+              </button>
+            </form>
+            <div className="message-list">
+              {latestMessages.length === 0 ? (
+                <p>No hay mensajes todavia.</p>
+              ) : (
+                latestMessages.map((item) => (
+                  <article className={`message-item ${item.type}`} key={item.id}>
+                    <div>
+                      <span>{labelChatType(item.type)}</span>
+                      <strong>{item.author}</strong>
+                      <time>{formatDateTime(item.createdAt)}</time>
+                    </div>
+                    <p>{item.text}</p>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
 
           <div ref={reportRef} className="report-page">
             <div className="report-header">
@@ -1904,6 +2047,16 @@ function loadRecords(): MineRecord[] {
   }
 }
 
+function loadChatMessages(): ChatMessage[] {
+  try {
+    return mergeChatMessages(
+      (JSON.parse(localStorage.getItem(MESSAGE_STORAGE_KEY) ?? '[]') as ChatMessage[]).map(normalizeChatMessage),
+    )
+  } catch {
+    return []
+  }
+}
+
 function getInitialSection(): 'captura' | 'dashboard' {
   const params = new URLSearchParams(window.location.search)
   const requestedView = params.get('vista')
@@ -1947,6 +2100,19 @@ function normalizeRecord(record: MineRecord): MineRecord {
   return baseRecord
 }
 
+function normalizeChatMessage(message: ChatMessage): ChatMessage {
+  const createdAt = message.createdAt ?? nowIso()
+  return {
+    ...message,
+    id: message.id || crypto.randomUUID(),
+    type: ['aviso', 'mensaje', 'urgente'].includes(message.type) ? message.type : 'mensaje',
+    author: message.author?.trim() || 'Operacion',
+    text: message.text?.trim() || '',
+    createdAt,
+    updatedAt: message.updatedAt ?? createdAt,
+  }
+}
+
 function mergeRecords(records: MineRecord[]) {
   const map = new Map<string, MineRecord>()
   records.map(normalizeRecord).forEach((record) => {
@@ -1956,6 +2122,17 @@ function mergeRecords(records: MineRecord[]) {
     }
   })
   return Array.from(map.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+}
+
+function mergeChatMessages(messages: ChatMessage[]) {
+  const map = new Map<string, ChatMessage>()
+  messages.map(normalizeChatMessage).filter((item) => item.text).forEach((item) => {
+    const current = map.get(item.id)
+    if (!current || new Date(item.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) {
+      map.set(item.id, item)
+    }
+  })
+  return Array.from(map.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 }
 
 function sum<T>(rows: T[], key: keyof T) {
@@ -2009,6 +2186,21 @@ function labelType(type: RecordType) {
     rezagado: 'Rezagado retro',
     seguridad: 'Seguridad',
   }[type]
+}
+
+function labelChatType(type: ChatMessageType) {
+  return {
+    aviso: 'Aviso',
+    mensaje: 'Mensaje',
+    urgente: 'Urgente',
+  }[type]
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString('es-MX', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  })
 }
 
 async function loadTemplatePdf(path: string) {

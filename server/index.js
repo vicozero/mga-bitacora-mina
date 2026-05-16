@@ -11,6 +11,8 @@ const app = express()
 const port = process.env.PORT || 3000
 const dataFile =
   process.env.DATA_FILE || path.join(__dirname, '..', 'data', 'records.json')
+const messagesFile =
+  process.env.MESSAGES_FILE || path.join(path.dirname(dataFile), 'messages.json')
 const distDir = path.join(__dirname, '..', 'dist')
 const defaultPublicUrl = 'https://mga-bitacora-mina.onrender.com'
 
@@ -33,6 +35,20 @@ app.post('/api/records/sync', async (req, res) => {
   await writeRecords(records)
   void notifySlack(slackEvents)
   res.json({ records })
+})
+
+app.get('/api/messages', async (_req, res) => {
+  res.json({ messages: await readMessages() })
+})
+
+app.post('/api/messages/sync', async (req, res) => {
+  const incoming = Array.isArray(req.body?.messages) ? req.body.messages : []
+  const existing = await readMessages()
+  const slackEvents = getNewMessages(incoming, existing)
+  const messages = mergeMessages([...existing, ...incoming])
+  await writeMessages(messages)
+  void notifySlackMessages(slackEvents)
+  res.json({ messages })
 })
 
 app.put('/api/records/:id', async (req, res) => {
@@ -85,6 +101,21 @@ async function writeRecords(records) {
   await fs.writeFile(dataFile, JSON.stringify(mergeRecords(records), null, 2))
 }
 
+async function readMessages() {
+  try {
+    const content = await fs.readFile(messagesFile, 'utf8')
+    return mergeMessages(JSON.parse(content))
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error(error)
+    return []
+  }
+}
+
+async function writeMessages(messages) {
+  await fs.mkdir(path.dirname(messagesFile), { recursive: true })
+  await fs.writeFile(messagesFile, JSON.stringify(mergeMessages(messages), null, 2))
+}
+
 function normalizeRecord(record) {
   const now = new Date().toISOString()
   const createdAt = record.createdAt || now
@@ -107,6 +138,39 @@ function mergeRecords(records) {
   return Array.from(map.values()).sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   )
+}
+
+function normalizeMessage(message) {
+  const now = new Date().toISOString()
+  const createdAt = message.createdAt || now
+  return {
+    id: message.id || randomUUID(),
+    type: ['aviso', 'mensaje', 'urgente'].includes(message.type) ? message.type : 'mensaje',
+    author: String(message.author || 'Operacion'),
+    text: String(message.text || '').trim(),
+    createdAt,
+    updatedAt: message.updatedAt || createdAt,
+  }
+}
+
+function mergeMessages(messages) {
+  const map = new Map()
+  messages.map(normalizeMessage).filter((message) => message.text).forEach((message) => {
+    const current = map.get(message.id)
+    if (!current || new Date(message.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) {
+      map.set(message.id, message)
+    }
+  })
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
+}
+
+function getNewMessages(incoming, existing) {
+  const existingById = new Map(existing.map((message) => [message.id, message]))
+  return incoming
+    .map(normalizeMessage)
+    .filter((message) => message.text && !existingById.has(message.id))
 }
 
 function getSlackEvents(incoming, existing) {
@@ -152,6 +216,46 @@ async function notifySlack(events) {
   } catch (error) {
     console.error('Slack webhook failed', error)
   }
+}
+
+async function notifySlackMessages(messages) {
+  const webhookUrl = process.env.SLACK_WEBHOOK_URL
+  if (!webhookUrl || messages.length === 0) return
+
+  const maxMessages = 5
+  const publicUrl = process.env.PUBLIC_APP_URL || defaultPublicUrl
+  const lines = messages.slice(0, maxMessages).map(formatSlackMessage)
+  const extra = messages.length > maxMessages ? `\n...y ${messages.length - maxMessages} mensaje(s) mas.` : ''
+  const text = [
+    `MGA Bitacora Mina: ${messages.length} aviso(s) del centro de mensajes`,
+    ...lines,
+    extra,
+    `Panel: ${publicUrl}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    if (!response.ok) {
+      console.error(`Slack webhook failed with HTTP ${response.status}`)
+    }
+  } catch (error) {
+    console.error('Slack webhook failed', error)
+  }
+}
+
+function formatSlackMessage(message) {
+  const typeLabel = {
+    aviso: 'Aviso',
+    mensaje: 'Mensaje',
+    urgente: 'Urgente',
+  }[message.type] || 'Mensaje'
+  return `- ${typeLabel}: ${message.text} - ${message.author}`
 }
 
 function formatSlackEvent({ action, record }) {
