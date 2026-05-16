@@ -7,6 +7,7 @@ import {
   Drill,
   Download,
   Edit3,
+  FileSpreadsheet,
   FileDown,
   HardHat,
   History,
@@ -24,8 +25,11 @@ import {
   X,
 } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
+import ExcelJS from 'exceljs'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
+import type { PDFPage as PdfPage, PDFFont as PdfFont } from 'pdf-lib'
 import {
   jumboEquipoOptions,
   retroEquipoOptions,
@@ -167,6 +171,8 @@ type MineRecord = BarrenacionRecord | RezagadoRecord | SeguridadRecord
 const STORAGE_KEY = 'mga-bitacora-operaciones-v1'
 const API_URL_KEY = 'mga-bitacora-api-url'
 const DEFAULT_API_URL = 'https://mga-bitacora-mina.onrender.com'
+const BARRENACION_TEMPLATE = '/templates/barrenacion-voladuras.pdf'
+const REZAGADO_TEMPLATE = '/templates/rezagado.pdf'
 const today = new Date().toISOString().slice(0, 10)
 
 const baseDefaults = {
@@ -508,6 +514,36 @@ function App() {
     pdf.save(`reporte-kpi-mga-${today}.pdf`)
   }
 
+  async function exportRecordPdf(record: MineRecord) {
+    if (record.type === 'seguridad') {
+      setMessage('El formato PDF adjunto aplica a barrenacion/voladuras y rezagado.')
+      return
+    }
+    const bytes = record.type === 'barrenacion'
+      ? await buildBarrenacionPdf(record)
+      : await buildRezagadoPdf(record)
+    downloadBlob(
+      bytes,
+      `${record.type}-${record.fecha}-turno-${record.turno}.pdf`,
+      'application/pdf',
+    )
+  }
+
+  async function exportRecordExcel(record: MineRecord) {
+    if (record.type === 'seguridad') {
+      setMessage('El formato Excel adjunto aplica a barrenacion/voladuras y rezagado.')
+      return
+    }
+    const bytes = record.type === 'barrenacion'
+      ? await buildBarrenacionExcel(record)
+      : await buildRezagadoExcel(record)
+    downloadBlob(
+      bytes,
+      `${record.type}-${record.fecha}-turno-${record.turno}.xlsx`,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+  }
+
   return (
     <main className={`app-shell ${section === 'captura' ? 'capture-mode' : 'review-mode'}`}>
       <header className="topbar">
@@ -674,7 +710,7 @@ function App() {
                 <input type="file" accept="application/json" onChange={importJson} />
               </label>
               <button onClick={exportPdf}>
-                <FileDown size={18} /> PDF
+                <FileDown size={18} /> PDF KPI
               </button>
             </div>
           </div>
@@ -743,6 +779,16 @@ function App() {
                         </span>
                       </td>
                       <td className="table-actions" data-html2canvas-ignore="true">
+                        {record.type !== 'seguridad' && (
+                          <>
+                            <button className="icon-button" onClick={() => void exportRecordPdf(record)} aria-label="Descargar PDF formato">
+                              <FileDown size={16} />
+                            </button>
+                            <button className="icon-button" onClick={() => void exportRecordExcel(record)} aria-label="Descargar Excel formato">
+                              <FileSpreadsheet size={16} />
+                            </button>
+                          </>
+                        )}
                         <button className="icon-button" onClick={() => startEdit(record)} aria-label="Editar">
                           <Edit3 size={16} />
                         </button>
@@ -1135,6 +1181,420 @@ function Metric({ label, value }: { label: string; value: number }) {
   )
 }
 
+async function buildBarrenacionPdf(record: BarrenacionRecord) {
+  const pdfDoc = await loadTemplatePdf(BARRENACION_TEMPLATE)
+  const page = pdfDoc.getPage(0)
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+
+  drawPdfText(page, font, record.supervisor, 166, 150, 6, 92)
+  drawPdfText(page, font, record.fecha, 545, 150, 6, 70)
+  drawPdfText(page, bold, 'X', record.turno === '1' ? 688 : 716, 150, 8, 12)
+
+  record.jumbo.filter(hasDrillData).slice(0, 6).forEach((row, index) => {
+    drawDrillPdfRow(page, font, row, 184 + index * 12)
+  })
+  record.maquinaPierna.filter(hasDrillData).slice(0, 6).forEach((row, index) => {
+    drawDrillPdfRow(page, font, row, 258 + index * 12)
+  })
+  record.voladuras.filter(hasBlastData).slice(0, 6).forEach((row, index) => {
+    drawBlastPdfRow(page, font, row, 342 + index * 12)
+  })
+
+  const activityTop = 420
+  const activityRows = [
+    record.polvorero,
+    record.choferCamion,
+    record.choferPipa,
+    record.bobCat,
+    record.bombeo,
+    record.servicios,
+  ]
+  activityRows.forEach((value, index) => drawPdfText(page, font, value, 167, activityTop + index * 10, 5.8, 190))
+  drawPdfWrappedText(page, font, record.comentarios, 478, 416, 125, 5.6, 7, 11)
+  drawPdfWrappedText(page, font, record.inasistencias, 610, 416, 120, 5.6, 7, 11)
+
+  return pdfDoc.save()
+}
+
+async function buildRezagadoPdf(record: RezagadoRecord) {
+  const pdfDoc = await loadTemplatePdf(REZAGADO_TEMPLATE)
+  const page = pdfDoc.getPage(0)
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+
+  drawPdfText(page, font, record.supervisor, 140, 76, 6, 120)
+  drawPdfText(page, font, record.fecha, 565, 76, 6, 70)
+  drawPdfText(page, bold, 'X', record.turno === '1' ? 724 : 748, 76, 8, 12)
+
+  record.scoopTram.filter(hasHaulData).slice(0, 16).forEach((row, index) => {
+    drawHaulPdfRow(page, font, row, 114 + index * 10.6)
+  })
+  record.retro.filter(hasRetroData).slice(0, 14).forEach((row, index) => {
+    drawRetroPdfRow(page, font, row, 324 + index * 10.9)
+  })
+
+  return pdfDoc.save()
+}
+
+function drawDrillPdfRow(page: PdfPage, font: PdfFont, row: DrillRow, top: number) {
+  drawPdfText(page, font, row.equipo, 82, top, 5.4, 34)
+  drawPdfText(page, font, row.nivelObra, 119, top, 5.4, 48)
+  drawPdfText(page, font, row.operador, 169, top, 5.4, 92)
+  drawPdfText(page, font, row.ayudante, 270, top, 5.4, 92)
+  drawPdfText(page, font, row.rpaCfte, 370, top, 5.2, 19)
+  drawPdfText(page, font, valueText(row.longitud), 394, top, 5.2, 17)
+  drawPdfText(page, font, valueText(row.cuele), 418, top, 5.2, 17)
+  drawPdfText(page, font, valueText(row.desarrollo), 443, top, 5.2, 35)
+  drawPdfText(page, font, valueText(row.barrenosDados), 476, top, 5.2, 20)
+  drawPdfText(page, font, valueText(row.barrenosCargados), 501, top, 5.2, 20)
+  drawPdfText(page, font, valueText(row.metrosDados), 526, top, 5.2, 20)
+  drawPdfText(page, font, valueText(row.horasServicio), 550, top, 5.2, 18)
+  drawPdfText(page, font, valueText(row.zanco), 566, top, 5.2, 13)
+  drawPdfText(page, font, valueText(row.cople), 581, top, 5.2, 13)
+  drawPdfText(page, font, valueText(row.barra), 596, top, 5.2, 13)
+  drawPdfText(page, font, valueText(row.broca), 611, top, 5.2, 13)
+  drawPdfText(page, font, valueText(row.horometroDieselInicial), 632, top, 5.2, 24)
+  drawPdfText(page, font, valueText(row.horometroDieselFinal), 661, top, 5.2, 24)
+  drawPdfText(page, font, valueText(row.horometroElectInicial), 690, top, 5.2, 24)
+  drawPdfText(page, font, valueText(row.horometroElectFinal), 719, top, 5.2, 24)
+}
+
+function drawBlastPdfRow(page: PdfPage, font: PdfFont, row: BlastRow, top: number) {
+  drawPdfText(page, font, row.obra, 83, top, 5.4, 34)
+  drawPdfText(page, font, row.rpaCfte || row.obra, 121, top, 5.4, 48)
+  drawPdfText(page, font, row.oficial, 170, top, 5.4, 92)
+  drawPdfText(page, font, row.ayudante, 273, top, 5.4, 68)
+  drawPdfText(page, font, row.rpaCfte, 349, top, 5.2, 20)
+  drawPdfText(page, font, valueText(row.longitud), 376, top, 5.2, 19)
+  drawPdfText(page, font, valueText(row.cuele), 398, top, 5.2, 19)
+  drawPdfText(page, font, valueText(row.desarrollo), 422, top, 5.2, 35)
+  drawPdfText(page, font, valueText(row.barrenosPegados), 447, top, 5.2, 30)
+  drawPdfText(page, font, valueText(row.metrosPegados), 488, top, 5.2, 20)
+  drawPdfText(page, font, valueText(row.horasServicio), 512, top, 5.2, 20)
+  drawPdfText(page, font, valueText(row.anfoInicial), 543, top, 5.2, 40)
+  drawPdfText(page, font, valueText(row.anfoFinal), 585, top, 5.2, 40)
+  drawPdfText(page, font, row.observaciones, 610, top, 5.2, 125)
+}
+
+function drawHaulPdfRow(page: PdfPage, font: PdfFont, row: HaulRow, top: number) {
+  drawPdfText(page, font, row.equipo, 29, top, 5.3, 30)
+  drawPdfText(page, font, row.operador, 64, top, 5.3, 72)
+  drawPdfText(page, font, row.nivelObra, 143, top, 5.3, 68)
+  drawPdfText(page, font, row.destino, 218, top, 5.3, 62)
+  drawPdfText(page, font, valueText(row.rezagado), 292, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.traspaleo), 320, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.limpia), 348, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.balastreo), 374, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.planilla), 403, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.relleno), 430, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.camiones), 458, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.horometroInicial), 488, top, 5.2, 38)
+  drawPdfText(page, font, valueText(row.horometroFinal), 530, top, 5.2, 38)
+  drawPdfText(page, font, valueText(row.diesel), 568, top, 5.2, 28)
+  drawPdfText(page, font, row.observaciones, 598, top, 5.2, 155)
+}
+
+function drawRetroPdfRow(page: PdfPage, font: PdfFont, row: RetroRow, top: number) {
+  drawPdfText(page, font, row.equipo, 29, top, 5.3, 30)
+  drawPdfText(page, font, row.operador, 64, top, 5.3, 72)
+  drawPdfText(page, font, row.nivelObra, 143, top, 5.3, 138)
+  drawPdfText(page, font, valueText(row.amacice), 294, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.reAmacice), 321, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.tableo), 349, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.limpia), 375, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.balastreo), 402, top, 5.2, 22)
+  drawPdfText(page, font, valueText(row.mtAcequia), 432, top, 5.2, 28)
+  drawPdfText(page, font, valueText(row.horometroInicial), 463, top, 5.2, 36)
+  drawPdfText(page, font, valueText(row.horometroFinal), 504, top, 5.2, 36)
+  drawPdfText(page, font, valueText(row.diesel), 535, top, 5.2, 32)
+  drawPdfText(page, font, row.observaciones, 565, top, 5.2, 180)
+}
+
+async function buildBarrenacionExcel(record: BarrenacionRecord) {
+  const workbook = createWorkbook()
+  const sheet = workbook.addWorksheet('Barrenacion y Voladuras')
+  setupSheet(sheet, [6, 18, 18, 26, 26, 12, 10, 10, 18, 12, 13, 12, 12, 9, 9, 9, 9, 14, 14, 14, 14])
+  await addLogo(workbook, sheet)
+  sheet.mergeCells('C2:P2')
+  sheet.getCell('C2').value = 'Reporte Diario de Barrenacion y Voladuras'
+  sheet.getCell('C2').font = { bold: true, size: 14 }
+  sheet.getCell('C2').alignment = centerAlign
+  sheet.mergeCells('B4:D4')
+  sheet.getCell('B4').value = `Supervisor: ${record.supervisor || ''}`
+  sheet.mergeCells('F4:H4')
+  sheet.getCell('F4').value = `Fecha: ${record.fecha}`
+  sheet.mergeCells('J4:K4')
+  sheet.getCell('J4').value = `Turno: ${record.turno}`
+  sheet.mergeCells('M4:P4')
+  sheet.getCell('M4').value = record.unidad
+
+  const drillHeaders = [
+    'Area',
+    'Equipo',
+    'Nivel / Obra',
+    'Operador',
+    'Ayudante',
+    'RPA/Cfte',
+    'Longitud',
+    'Cuele',
+    'Desb/desc/corte',
+    'Barrenos Dados',
+    'Barrenos Cargados',
+    'Metros Dados',
+    'Hrs Servicio',
+    'Zanco',
+    'Cople',
+    'Barra',
+    'Broca',
+    'Hor. Diesel Inicial',
+    'Hor. Diesel Final',
+    'Hor. Elect Inicial',
+    'Hor. Elect Final',
+  ]
+  addHeaderRow(sheet, 6, drillHeaders)
+  addDrillExcelRows(sheet, 7, 'JUMBO', record.jumbo.filter(hasDrillData), 6)
+  addDrillExcelRows(sheet, 13, 'MAQUINA PIERNA', record.maquinaPierna.filter(hasDrillData), 6)
+
+  const blastStart = 21
+  const blastHeaders = [
+    'Area',
+    'Obra',
+    'Nivel / Obra',
+    'Oficial Voladuras',
+    'Ayudante Voladuras',
+    'RPA/Cfte',
+    'Longitud',
+    'Cuele',
+    'Desarrollo',
+    'Barrenos Pegados',
+    'Metros Pegados',
+    'Hrs Servicio',
+    'ANFO Inicial',
+    'ANFO Final',
+    'Observaciones',
+  ]
+  addHeaderRow(sheet, blastStart, blastHeaders)
+  addBlastExcelRows(sheet, blastStart + 1, record.voladuras.filter(hasBlastData), 6)
+
+  const activitiesStart = blastStart + 9
+  sheet.mergeCells(`A${activitiesStart}:C${activitiesStart}`)
+  sheet.getCell(`A${activitiesStart}`).value = 'ACTIVIDADES'
+  sheet.mergeCells(`D${activitiesStart}:G${activitiesStart}`)
+  sheet.getCell(`D${activitiesStart}`).value = 'RESPONSABLE / COMENTARIO'
+  sheet.mergeCells(`H${activitiesStart}:L${activitiesStart}`)
+  sheet.getCell(`H${activitiesStart}`).value = 'CONTRATIEMPOS / COMENTARIOS GENERALES'
+  sheet.mergeCells(`M${activitiesStart}:Q${activitiesStart}`)
+  sheet.getCell(`M${activitiesStart}`).value = 'INASISTENCIAS / PERMISOS'
+  const activities = [
+    ['POLVORERO', record.polvorero],
+    ['CHOFER CAMION PERSONAL', record.choferCamion],
+    ['CHOFER PIPA', record.choferPipa],
+    ['BOB CAT', record.bobCat],
+    ['BOMBEO', record.bombeo],
+    ['SERVICIOS', record.servicios],
+  ]
+  activities.forEach(([label, value], index) => {
+    const rowNumber = activitiesStart + 1 + index
+    sheet.mergeCells(`A${rowNumber}:C${rowNumber}`)
+    sheet.getCell(`A${rowNumber}`).value = label
+    sheet.mergeCells(`D${rowNumber}:G${rowNumber}`)
+    sheet.getCell(`D${rowNumber}`).value = value
+  })
+  sheet.mergeCells(`H${activitiesStart + 1}:L${activitiesStart + 6}`)
+  sheet.getCell(`H${activitiesStart + 1}`).value = record.comentarios
+  sheet.mergeCells(`M${activitiesStart + 1}:Q${activitiesStart + 6}`)
+  sheet.getCell(`M${activitiesStart + 1}`).value = record.inasistencias
+  styleUsedCells(sheet, 1, activitiesStart + 6, 21)
+  return workbook.xlsx.writeBuffer()
+}
+
+async function buildRezagadoExcel(record: RezagadoRecord) {
+  const workbook = createWorkbook()
+  const sheet = workbook.addWorksheet('Rezagado')
+  setupSheet(sheet, [8, 18, 22, 22, 18, 11, 11, 11, 12, 11, 11, 11, 14, 14, 12, 36])
+  await addLogo(workbook, sheet)
+  sheet.mergeCells('C2:N2')
+  sheet.getCell('C2').value = 'Reporte Diario de Rezagado'
+  sheet.getCell('C2').font = { bold: true, size: 14 }
+  sheet.getCell('C2').alignment = centerAlign
+  sheet.mergeCells('B4:D4')
+  sheet.getCell('B4').value = `Supervisor: ${record.supervisor || ''}`
+  sheet.mergeCells('F4:H4')
+  sheet.getCell('F4').value = `Fecha: ${record.fecha}`
+  sheet.mergeCells('J4:K4')
+  sheet.getCell('J4').value = `Turno: ${record.turno}`
+
+  const haulHeaders = [
+    'Area',
+    'Equipo',
+    'Operador',
+    'Nivel / Obra',
+    'Destino',
+    'Rezagado',
+    'Traspaleo',
+    'Limpia',
+    'Balastreo',
+    'Planilla',
+    'Relleno',
+    'Camiones',
+    'Hor. Inicial',
+    'Hor. Final',
+    'Diesel',
+    'Observaciones',
+  ]
+  addHeaderRow(sheet, 6, haulHeaders)
+  addHaulExcelRows(sheet, 7, record.scoopTram.filter(hasHaulData), 16)
+
+  const retroStart = 25
+  const retroHeaders = [
+    'Area',
+    'Equipo',
+    'Operador',
+    'Nivel / Obra',
+    'Amacice',
+    'Re-amacice',
+    'Tableo',
+    'Limpia',
+    'Balastreo',
+    'MT Acequia',
+    'Hor. Inicial',
+    'Hor. Final',
+    'Diesel',
+    'Observaciones',
+  ]
+  addHeaderRow(sheet, retroStart, retroHeaders)
+  addRetroExcelRows(sheet, retroStart + 1, record.retro.filter(hasRetroData), 14)
+  styleUsedCells(sheet, 1, retroStart + 14, 16)
+  return workbook.xlsx.writeBuffer()
+}
+
+function addDrillExcelRows(sheet: ExcelJS.Worksheet, startRow: number, area: string, rows: DrillRow[], minimumRows: number) {
+  const totalRows = Math.max(rows.length, minimumRows)
+  if (totalRows > 1) sheet.mergeCells(startRow, 1, startRow + totalRows - 1, 1)
+  sheet.getCell(startRow, 1).value = area
+  for (let index = 0; index < totalRows; index += 1) {
+    const row = rows[index]
+    const values = row
+      ? [
+          row.equipo,
+          row.nivelObra,
+          row.operador,
+          row.ayudante,
+          row.rpaCfte,
+          row.longitud,
+          row.cuele,
+          row.desarrollo,
+          row.barrenosDados,
+          row.barrenosCargados,
+          row.metrosDados,
+          row.horasServicio,
+          row.zanco,
+          row.cople,
+          row.barra,
+          row.broca,
+          row.horometroDieselInicial,
+          row.horometroDieselFinal,
+          row.horometroElectInicial,
+          row.horometroElectFinal,
+        ]
+      : []
+    values.forEach((value, colIndex) => {
+      sheet.getCell(startRow + index, colIndex + 2).value = value || ''
+    })
+  }
+}
+
+function addBlastExcelRows(sheet: ExcelJS.Worksheet, startRow: number, rows: BlastRow[], minimumRows: number) {
+  const totalRows = Math.max(rows.length, minimumRows)
+  if (totalRows > 1) sheet.mergeCells(startRow, 1, startRow + totalRows - 1, 1)
+  sheet.getCell(startRow, 1).value = 'VOLADURAS'
+  for (let index = 0; index < totalRows; index += 1) {
+    const row = rows[index]
+    const values = row
+      ? [
+          row.obra,
+          row.rpaCfte || row.obra,
+          row.oficial,
+          row.ayudante,
+          row.rpaCfte,
+          row.longitud,
+          row.cuele,
+          row.desarrollo,
+          row.barrenosPegados,
+          row.metrosPegados,
+          row.horasServicio,
+          row.anfoInicial,
+          row.anfoFinal,
+          row.observaciones,
+        ]
+      : []
+    values.forEach((value, colIndex) => {
+      sheet.getCell(startRow + index, colIndex + 2).value = value || ''
+    })
+  }
+}
+
+function addHaulExcelRows(sheet: ExcelJS.Worksheet, startRow: number, rows: HaulRow[], minimumRows: number) {
+  const totalRows = Math.max(rows.length, minimumRows)
+  if (totalRows > 1) sheet.mergeCells(startRow, 1, startRow + totalRows - 1, 1)
+  sheet.getCell(startRow, 1).value = 'SCOOP TRAM'
+  for (let index = 0; index < totalRows; index += 1) {
+    const row = rows[index]
+    const values = row
+      ? [
+          row.equipo,
+          row.operador,
+          row.nivelObra,
+          row.destino,
+          row.rezagado,
+          row.traspaleo,
+          row.limpia,
+          row.balastreo,
+          row.planilla,
+          row.relleno,
+          row.camiones,
+          row.horometroInicial,
+          row.horometroFinal,
+          row.diesel,
+          row.observaciones,
+        ]
+      : []
+    values.forEach((value, colIndex) => {
+      sheet.getCell(startRow + index, colIndex + 2).value = value || ''
+    })
+  }
+}
+
+function addRetroExcelRows(sheet: ExcelJS.Worksheet, startRow: number, rows: RetroRow[], minimumRows: number) {
+  const totalRows = Math.max(rows.length, minimumRows)
+  if (totalRows > 1) sheet.mergeCells(startRow, 1, startRow + totalRows - 1, 1)
+  sheet.getCell(startRow, 1).value = 'RETRO'
+  for (let index = 0; index < totalRows; index += 1) {
+    const row = rows[index]
+    const values = row
+      ? [
+          row.equipo,
+          row.operador,
+          row.nivelObra,
+          row.amacice,
+          row.reAmacice,
+          row.tableo,
+          row.limpia,
+          row.balastreo,
+          row.mtAcequia,
+          row.horometroInicial,
+          row.horometroFinal,
+          row.diesel,
+          row.observaciones,
+        ]
+      : []
+    values.forEach((value, colIndex) => {
+      sheet.getCell(startRow + index, colIndex + 2).value = value || ''
+    })
+  }
+}
+
 function loadRecords(): MineRecord[] {
   try {
     return (JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as MineRecord[]).map(normalizeRecord)
@@ -1230,6 +1690,182 @@ function labelType(type: RecordType) {
     rezagado: 'Rezagado retro',
     seguridad: 'Seguridad',
   }[type]
+}
+
+async function loadTemplatePdf(path: string) {
+  const response = await fetch(path)
+  if (!response.ok) throw new Error(`No se pudo cargar la plantilla ${path}`)
+  return PDFDocument.load(await response.arrayBuffer())
+}
+
+function drawPdfText(
+  page: PdfPage,
+  font: PdfFont,
+  value: string | number | undefined,
+  x: number,
+  top: number,
+  size: number,
+  maxWidth: number,
+) {
+  const text = fitPdfText(font, valueText(value, true), size, maxWidth)
+  if (!text) return
+  page.drawText(text, {
+    x,
+    y: page.getHeight() - top - size,
+    size,
+    font,
+    color: rgb(0, 0, 0),
+  })
+}
+
+function drawPdfWrappedText(
+  page: PdfPage,
+  font: PdfFont,
+  value: string | number | undefined,
+  x: number,
+  top: number,
+  maxWidth: number,
+  size: number,
+  lineHeight: number,
+  maxLines: number,
+) {
+  const text = valueText(value, true)
+  if (!text) return
+  const lines = wrapPdfText(font, text, size, maxWidth).slice(0, maxLines)
+  lines.forEach((line, index) => {
+    drawPdfText(page, font, line, x, top + index * lineHeight, size, maxWidth)
+  })
+}
+
+function wrapPdfText(font: PdfFont, text: string, size: number, maxWidth: number) {
+  const words = text.split(/\s+/).filter(Boolean)
+  const lines: string[] = []
+  let current = ''
+  words.forEach((word) => {
+    const next = current ? `${current} ${word}` : word
+    if (font.widthOfTextAtSize(next, size) <= maxWidth) {
+      current = next
+      return
+    }
+    if (current) lines.push(current)
+    current = word
+  })
+  if (current) lines.push(current)
+  return lines
+}
+
+function fitPdfText(font: PdfFont, text: string, size: number, maxWidth: number) {
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text
+  let output = text
+  while (output.length > 0 && font.widthOfTextAtSize(`${output}...`, size) > maxWidth) {
+    output = output.slice(0, -1)
+  }
+  return output ? `${output}...` : ''
+}
+
+function valueText(value: string | number | undefined, showZero = false) {
+  if (value === undefined || value === null) return ''
+  if (typeof value === 'number') {
+    if (!showZero && value === 0) return ''
+    return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  }
+  return value
+}
+
+function downloadBlob(content: BlobPart | Uint8Array, filename: string, type: string) {
+  const blob = new Blob([content instanceof Uint8Array ? (content.slice().buffer as ArrayBuffer) : content], { type })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function createWorkbook() {
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = 'MGA Bitacora Mina'
+  workbook.created = new Date()
+  workbook.modified = new Date()
+  return workbook
+}
+
+function setupSheet(sheet: ExcelJS.Worksheet, widths: number[]) {
+  sheet.views = [{ showGridLines: false }]
+  sheet.pageSetup = {
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 1,
+    paperSize: 9,
+  }
+  sheet.columns = widths.map((width) => ({ width }))
+  for (let rowNumber = 1; rowNumber <= 44; rowNumber += 1) {
+    sheet.getRow(rowNumber).height = 18
+  }
+}
+
+async function addLogo(workbook: ExcelJS.Workbook, sheet: ExcelJS.Worksheet) {
+  try {
+    const response = await fetch('/mga-logo.jfif')
+    if (!response.ok) return
+    const base64 = await blobToDataUrl(await response.blob())
+    const imageId = workbook.addImage({ base64, extension: 'jpeg' })
+    sheet.addImage(imageId, {
+      tl: { col: 0.1, row: 0.2 },
+      ext: { width: 90, height: 44 },
+    })
+  } catch {
+    // Logo is decorative in Excel export; keep the workbook usable if it cannot be embedded.
+  }
+}
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
+function addHeaderRow(sheet: ExcelJS.Worksheet, rowNumber: number, headers: string[]) {
+  const row = sheet.getRow(rowNumber)
+  row.values = headers
+  row.font = { bold: true, size: 9 }
+  row.alignment = centerAlign
+  row.eachCell((cell) => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } }
+  })
+}
+
+function styleUsedCells(sheet: ExcelJS.Worksheet, firstRow: number, lastRow: number, lastColumn: number) {
+  for (let rowNumber = firstRow; rowNumber <= lastRow; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber)
+    for (let colNumber = 1; colNumber <= lastColumn; colNumber += 1) {
+      const cell = row.getCell(colNumber)
+      cell.border = thinBorder
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: colNumber === 1 ? 'center' : 'center',
+        wrapText: true,
+      }
+      if (colNumber === 1) cell.font = { ...cell.font, bold: true }
+    }
+  }
+}
+
+const thinBorder = {
+  top: { style: 'thin' as const },
+  left: { style: 'thin' as const },
+  bottom: { style: 'thin' as const },
+  right: { style: 'thin' as const },
+}
+
+const centerAlign = {
+  vertical: 'middle' as const,
+  horizontal: 'center' as const,
+  wrapText: true,
 }
 
 const haulActivityKeys = ['rezagado', 'traspaleo', 'limpia', 'balastreo', 'planilla', 'relleno'] as const

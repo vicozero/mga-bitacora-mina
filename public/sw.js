@@ -1,5 +1,12 @@
-const CACHE_NAME = 'mga-bitacora-v2'
-const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/mga-logo.jfif']
+const CACHE_NAME = 'mga-bitacora-v3'
+const ASSETS = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/mga-logo.jfif',
+  '/templates/barrenacion-voladuras.pdf',
+  '/templates/rezagado.pdf',
+]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)))
