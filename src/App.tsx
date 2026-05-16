@@ -625,73 +625,77 @@ function App() {
 
       {(drawerOpen || actionsOpen) && <button className="menu-backdrop" type="button" aria-label="Cerrar menu" onClick={closeMenus} />}
 
-      <aside className={`app-drawer ${drawerOpen ? 'open' : ''}`} aria-hidden={!drawerOpen}>
-        <div className="drawer-brand">
-          <img src="/mga-logo.jfif" alt="MGA" />
-          <div>
-            <span>MGA Operaciones Mina</span>
-            <strong>Panel de captura</strong>
+      {drawerOpen && (
+        <aside className="app-drawer open">
+          <div className="drawer-brand">
+            <img src="/mga-logo.jfif" alt="MGA" />
+            <div>
+              <span>MGA Operaciones Mina</span>
+              <strong>Panel de captura</strong>
+            </div>
           </div>
-        </div>
-        <button className={section === 'captura' ? 'active' : ''} type="button" onClick={goToCapture}>
-          <ClipboardCheck size={20} />
-          <span>Captura de campo</span>
-          <small>Registro rapido offline</small>
-        </button>
-        <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
-          <LayoutDashboard size={20} />
-          <span>Revision web</span>
-          <small>KPI, reportes y descargas</small>
-        </button>
-        <button type="button" onClick={startNewCapture}>
-          <Edit3 size={20} />
-          <span>Nueva captura</span>
-          <small>Limpia el formulario actual</small>
-        </button>
-        <button type="button" onClick={() => {
-          closeMenus()
-          void syncRecords()
-        }}>
-          <RefreshCw size={20} className={syncing ? 'spin' : ''} />
-          <span>Sincronizar</span>
-          <small>{pendingSync > 0 ? `${pendingSync} pendientes` : 'Datos al dia'}</small>
-        </button>
-      </aside>
+          <button className={section === 'captura' ? 'active' : ''} type="button" onClick={goToCapture}>
+            <ClipboardCheck size={20} />
+            <span>Captura de campo</span>
+            <small>Registro rapido offline</small>
+          </button>
+          <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
+            <LayoutDashboard size={20} />
+            <span>Revision web</span>
+            <small>KPI, reportes y descargas</small>
+          </button>
+          <button type="button" onClick={startNewCapture}>
+            <Edit3 size={20} />
+            <span>Nueva captura</span>
+            <small>Limpia el formulario actual</small>
+          </button>
+          <button type="button" onClick={() => {
+            closeMenus()
+            void syncRecords()
+          }}>
+            <RefreshCw size={20} className={syncing ? 'spin' : ''} />
+            <span>Sincronizar</span>
+            <small>{pendingSync > 0 ? `${pendingSync} pendientes` : 'Datos al dia'}</small>
+          </button>
+        </aside>
+      )}
 
-      <div className={`actions-menu ${actionsOpen ? 'open' : ''}`} aria-hidden={!actionsOpen}>
-        <button type="button" onClick={startNewCapture}>
-          <Edit3 size={18} /> Nueva captura
-        </button>
-        <button type="button" onClick={() => {
-          closeMenus()
-          void syncRecords()
-        }}>
-          <RefreshCw size={18} className={syncing ? 'spin' : ''} /> Sincronizar
-        </button>
-        <button type="button" onClick={goToDashboard}>
-          <LayoutDashboard size={18} /> Revision web
-        </button>
-        <label className="file-button menu-file">
-          <Upload size={18} /> Importar respaldo
-          <input type="file" accept="application/json" onChange={importJson} />
-        </label>
-        {section === 'dashboard' && (
+      {actionsOpen && (
+        <div className="actions-menu open">
+          <button type="button" onClick={startNewCapture}>
+            <Edit3 size={18} /> Nueva captura
+          </button>
           <button type="button" onClick={() => {
             closeMenus()
-            void exportPdf()
+            void syncRecords()
           }}>
-            <FileDown size={18} /> PDF KPI
+            <RefreshCw size={18} className={syncing ? 'spin' : ''} /> Sincronizar
           </button>
-        )}
-        {editingId && (
-          <button type="button" onClick={() => {
-            closeMenus()
-            cancelEdit()
-          }}>
-            <X size={18} /> Cancelar edicion
+          <button type="button" onClick={goToDashboard}>
+            <LayoutDashboard size={18} /> Revision web
           </button>
-        )}
-      </div>
+          <label className="file-button menu-file">
+            <Upload size={18} /> Importar respaldo
+            <input type="file" accept="application/json" onChange={importJson} />
+          </label>
+          {section === 'dashboard' && (
+            <button type="button" onClick={() => {
+              closeMenus()
+              void exportPdf()
+            }}>
+              <FileDown size={18} /> PDF KPI
+            </button>
+          )}
+          {editingId && (
+            <button type="button" onClick={() => {
+              closeMenus()
+              cancelEdit()
+            }}>
+              <X size={18} /> Cancelar edicion
+            </button>
+          )}
+        </div>
+      )}
 
       {message && <div className="toast">{message}</div>}
       {editingId && section === 'dashboard' && (
