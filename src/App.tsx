@@ -5,7 +5,6 @@ import {
   BarChart3,
   ClipboardCheck,
   Drill,
-  Download,
   Edit3,
   FileSpreadsheet,
   FileDown,
@@ -329,6 +328,8 @@ function App() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [apiUrl, setApiUrl] = useState(loadApiUrl)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false)
   const reportRef = useRef<HTMLDivElement>(null)
 
   const visibleRecords = useMemo(() => records.filter((record) => !record.deletedAt), [records])
@@ -369,6 +370,17 @@ function App() {
     return () => window.removeEventListener('online', handleOnline)
     // The initial sync must run once on startup; saves trigger their own sync with fresh records.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDrawerOpen(false)
+        setActionsOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   function persist(next: MineRecord[]) {
@@ -429,6 +441,30 @@ function App() {
     setFormType(type)
   }
 
+  function closeMenus() {
+    setDrawerOpen(false)
+    setActionsOpen(false)
+  }
+
+  function goToCapture() {
+    setSection('captura')
+    closeMenus()
+  }
+
+  function goToDashboard() {
+    setSection('dashboard')
+    closeMenus()
+    void syncRecords({ silent: true })
+  }
+
+  function startNewCapture() {
+    resetForm(formType)
+    setEditingId(null)
+    setSection('captura')
+    closeMenus()
+    setMessage('Nueva captura lista.')
+  }
+
   function removeRecord(id: string) {
     const deletedAt = nowIso()
     const persisted = persist(
@@ -442,22 +478,13 @@ function App() {
     void syncRecords({ silent: true, sourceRecords: persisted })
   }
 
-  function exportJson() {
-    const blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `bitacora-mga-${today}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
   async function importJson(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
     const imported = JSON.parse(await file.text()) as MineRecord[]
     const persisted = persist([...imported.map(normalizeRecord), ...records])
     setMessage('Datos importados al panel local.')
+    closeMenus()
     void syncRecords({ silent: true, sourceRecords: persisted })
     event.target.value = ''
   }
@@ -547,7 +574,16 @@ function App() {
   return (
     <main className={`app-shell ${section === 'captura' ? 'capture-mode' : 'review-mode'}`}>
       <header className="topbar">
-        <button className="chrome-icon" aria-label="Menu" type="button">
+        <button
+          className="chrome-icon"
+          aria-expanded={drawerOpen}
+          aria-label="Abrir menu"
+          type="button"
+          onClick={() => {
+            setDrawerOpen((open) => !open)
+            setActionsOpen(false)
+          }}
+        >
           <Menu size={21} />
         </button>
         <div className="brand">
@@ -558,15 +594,12 @@ function App() {
           </div>
         </div>
         <nav className="mode-tabs" aria-label="Vista principal">
-          <button className={section === 'captura' ? 'active' : ''} onClick={() => setSection('captura')}>
+          <button className={section === 'captura' ? 'active' : ''} onClick={goToCapture}>
             <ClipboardCheck size={18} /> Captura
           </button>
           <button
             className={section === 'dashboard' ? 'active' : ''}
-            onClick={() => {
-              setSection('dashboard')
-              void syncRecords({ silent: true })
-            }}
+            onClick={goToDashboard}
           >
             <LayoutDashboard size={18} /> Revision web
           </button>
@@ -576,15 +609,105 @@ function App() {
           {syncing ? 'Conectando' : pendingSync > 0 ? 'Pendiente' : 'Al dia'}
           {pendingSync > 0 && <span>{pendingSync}</span>}
         </button>
-        <button className="chrome-icon" aria-label="Mas opciones" type="button">
+        <button
+          className="chrome-icon"
+          aria-expanded={actionsOpen}
+          aria-label="Abrir acciones"
+          type="button"
+          onClick={() => {
+            setActionsOpen((open) => !open)
+            setDrawerOpen(false)
+          }}
+        >
           <MoreVertical size={21} />
         </button>
       </header>
 
+      {(drawerOpen || actionsOpen) && <button className="menu-backdrop" type="button" aria-label="Cerrar menu" onClick={closeMenus} />}
+
+      <aside className={`app-drawer ${drawerOpen ? 'open' : ''}`} aria-hidden={!drawerOpen}>
+        <div className="drawer-brand">
+          <img src="/mga-logo.jfif" alt="MGA" />
+          <div>
+            <span>MGA Operaciones Mina</span>
+            <strong>Panel de captura</strong>
+          </div>
+        </div>
+        <button className={section === 'captura' ? 'active' : ''} type="button" onClick={goToCapture}>
+          <ClipboardCheck size={20} />
+          <span>Captura de campo</span>
+          <small>Registro rapido offline</small>
+        </button>
+        <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
+          <LayoutDashboard size={20} />
+          <span>Revision web</span>
+          <small>KPI, reportes y descargas</small>
+        </button>
+        <button type="button" onClick={startNewCapture}>
+          <Edit3 size={20} />
+          <span>Nueva captura</span>
+          <small>Limpia el formulario actual</small>
+        </button>
+        <button type="button" onClick={() => {
+          closeMenus()
+          void syncRecords()
+        }}>
+          <RefreshCw size={20} className={syncing ? 'spin' : ''} />
+          <span>Sincronizar</span>
+          <small>{pendingSync > 0 ? `${pendingSync} pendientes` : 'Datos al dia'}</small>
+        </button>
+      </aside>
+
+      <div className={`actions-menu ${actionsOpen ? 'open' : ''}`} aria-hidden={!actionsOpen}>
+        <button type="button" onClick={startNewCapture}>
+          <Edit3 size={18} /> Nueva captura
+        </button>
+        <button type="button" onClick={() => {
+          closeMenus()
+          void syncRecords()
+        }}>
+          <RefreshCw size={18} className={syncing ? 'spin' : ''} /> Sincronizar
+        </button>
+        <button type="button" onClick={goToDashboard}>
+          <LayoutDashboard size={18} /> Revision web
+        </button>
+        <label className="file-button menu-file">
+          <Upload size={18} /> Importar respaldo
+          <input type="file" accept="application/json" onChange={importJson} />
+        </label>
+        {section === 'dashboard' && (
+          <button type="button" onClick={() => {
+            closeMenus()
+            void exportPdf()
+          }}>
+            <FileDown size={18} /> PDF KPI
+          </button>
+        )}
+        {editingId && (
+          <button type="button" onClick={() => {
+            closeMenus()
+            cancelEdit()
+          }}>
+            <X size={18} /> Cancelar edicion
+          </button>
+        )}
+      </div>
+
       {message && <div className="toast">{message}</div>}
+      {editingId && section === 'dashboard' && (
+        <div className="edit-banner">
+          <span>Hay una captura en edicion.</span>
+          <button type="button" onClick={goToCapture}>
+            Continuar
+          </button>
+          <button type="button" onClick={cancelEdit}>
+            Cancelar
+          </button>
+        </div>
+      )}
 
       {section === 'captura' ? (
-        <form className="workspace" onSubmit={saveRecord}>
+        <form id="capture-form" className="workspace" onSubmit={saveRecord}>
           <aside className="side-panel">
             <div className="capture-badge">
               <Mountain size={18} /> Operacion mina
@@ -660,7 +783,7 @@ function App() {
                   <article className="recent-card" key={record.id}>
                     <button type="button" onClick={() => startEdit(record)}>
                       <span>{labelType(record.type)}</span>
-                      <strong>{record.fecha} · Turno {record.turno}</strong>
+                      <strong>{record.fecha} - Turno {record.turno}</strong>
                     </button>
                     <button className="icon-button danger" type="button" onClick={() => removeRecord(record.id)} aria-label="Eliminar captura">
                       <Trash2 size={16} />
@@ -702,13 +825,6 @@ function App() {
               <button onClick={() => void syncRecords()} disabled={syncing}>
                 <RefreshCw size={18} className={syncing ? 'spin' : ''} /> Sincronizar
               </button>
-              <button onClick={exportJson}>
-                <Download size={18} /> JSON
-              </button>
-              <label className="file-button">
-                <Upload size={18} /> Importar
-                <input type="file" accept="application/json" onChange={importJson} />
-              </label>
               <button onClick={exportPdf}>
                 <FileDown size={18} /> PDF KPI
               </button>
@@ -804,6 +920,31 @@ function App() {
           </div>
         </section>
       )}
+      <nav className="mobile-bottom-nav" aria-label="Acciones rapidas">
+        <button className={section === 'captura' ? 'active' : ''} type="button" onClick={goToCapture}>
+          <ClipboardCheck size={20} />
+          <span>Captura</span>
+        </button>
+        {section === 'captura' ? (
+          <button type="submit" form="capture-form">
+            <Save size={20} />
+            <span>Guardar</span>
+          </button>
+        ) : (
+          <button type="button" onClick={startNewCapture}>
+            <Edit3 size={20} />
+            <span>Nueva</span>
+          </button>
+        )}
+        <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
+          <LayoutDashboard size={20} />
+          <span>Revision</span>
+        </button>
+        <button type="button" onClick={() => void syncRecords()}>
+          <RefreshCw size={20} className={syncing ? 'spin' : ''} />
+          <span>Sync</span>
+        </button>
+      </nav>
     </main>
   )
 }
