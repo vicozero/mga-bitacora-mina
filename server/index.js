@@ -12,6 +12,7 @@ const port = process.env.PORT || 3000
 const dataFile =
   process.env.DATA_FILE || path.join(__dirname, '..', 'data', 'records.json')
 const distDir = path.join(__dirname, '..', 'dist')
+const defaultPublicUrl = 'https://mga-bitacora-mina.onrender.com'
 
 app.use(cors())
 app.use(express.json({ limit: '15mb' }))
@@ -126,10 +127,18 @@ async function notifySlack(events) {
   const webhookUrl = process.env.SLACK_WEBHOOK_URL
   if (!webhookUrl || events.length === 0) return
 
-  const maxEvents = 8
+  const maxEvents = 6
   const lines = events.slice(0, maxEvents).map(formatSlackEvent)
-  const extra = events.length > maxEvents ? `\n...y ${events.length - maxEvents} mas.` : ''
-  const text = `MGA Bitacora Mina: ${events.length} cambio(s) sincronizado(s)\n${lines.join('\n')}${extra}`
+  const extra = events.length > maxEvents ? `\n...y ${events.length - maxEvents} cambio(s) mas.` : ''
+  const publicUrl = process.env.PUBLIC_APP_URL || defaultPublicUrl
+  const text = [
+    `MGA Bitacora Mina: ${events.length} cambio(s) sincronizado(s)`,
+    ...lines,
+    extra,
+    `Panel: ${publicUrl}`,
+  ]
+    .filter(Boolean)
+    .join('\n')
 
   try {
     const response = await fetch(webhookUrl, {
@@ -156,8 +165,33 @@ function formatSlackEvent({ action, record }) {
     rezagado: 'Rezagado',
     seguridad: 'Seguridad',
   }[record.type] || record.type
-  const supervisor = record.supervisor ? ` - ${record.supervisor}` : ''
-  const turno = record.turno ? ` turno ${record.turno}` : ''
-  const fecha = record.fecha ? ` ${record.fecha}` : ''
-  return `- ${actionLabel}: ${typeLabel}${fecha}${turno}${supervisor}`
+  const details = [
+    record.fecha,
+    record.turno ? `Turno ${record.turno}` : '',
+    record.supervisor ? `Supervisor: ${record.supervisor}` : '',
+    record.unidad,
+    getRecordSummary(record),
+  ].filter(Boolean)
+  return `- ${actionLabel}: ${typeLabel} | ${details.join(' | ')}`
+}
+
+function getRecordSummary(record) {
+  if (record.type === 'barrenacion') {
+    const jumboCount = Array.isArray(record.jumbo) ? record.jumbo.length : 0
+    const piernaCount = Array.isArray(record.maquinaPierna) ? record.maquinaPierna.length : 0
+    const voladuraCount = Array.isArray(record.voladuras) ? record.voladuras.length : 0
+    return `Jumbo: ${jumboCount}, Maq. pierna: ${piernaCount}, Voladuras: ${voladuraCount}`
+  }
+  if (record.type === 'rezagado') {
+    const scoopCount = Array.isArray(record.scoopTram) ? record.scoopTram.length : 0
+    const retroCount = Array.isArray(record.retro) ? record.retro.length : 0
+    return `Scoop: ${scoopCount}, Retro: ${retroCount}`
+  }
+  if (record.type === 'seguridad') {
+    const accidentes = Number(record.accidentes || 0)
+    const incidentes = Number(record.incidentes || 0)
+    const fuerzaLaboral = Number(record.fuerzaLaboral || 0)
+    return `Accidentes: ${accidentes}, Incidentes: ${incidentes}, Fuerza laboral: ${fuerzaLaboral}`
+  }
+  return ''
 }
