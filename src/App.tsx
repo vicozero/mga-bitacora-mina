@@ -4,17 +4,23 @@ import {
   Activity,
   BarChart3,
   ClipboardCheck,
+  Drill,
   Download,
   Edit3,
   FileDown,
   HardHat,
   History,
   LayoutDashboard,
+  Menu,
+  MoreVertical,
+  Mountain,
+  Pickaxe,
   Plus,
   RefreshCw,
   Save,
   ShieldCheck,
   Trash2,
+  Truck,
   Upload,
   X,
 } from 'lucide-react'
@@ -329,6 +335,15 @@ function App() {
     )
   }, [visibleRecords, query])
   const kpis = useMemo(() => computeKpis(filtered), [filtered])
+  const recordCounts = useMemo(
+    () => ({
+      barrenacion: visibleRecords.filter((record) => record.type === 'barrenacion').length,
+      rezagado: visibleRecords.filter((record) => record.type === 'rezagado').length,
+      seguridad: visibleRecords.filter((record) => record.type === 'seguridad').length,
+      total: visibleRecords.length,
+    }),
+    [visibleRecords],
+  )
   const pendingSync = useMemo(
     () => records.filter((record) => record.updatedAt !== record.syncedAt).length,
     [records],
@@ -491,8 +506,11 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${section === 'captura' ? 'capture-mode' : 'review-mode'}`}>
       <header className="topbar">
+        <button className="chrome-icon" aria-label="Menu" type="button">
+          <Menu size={21} />
+        </button>
         <div className="brand">
           <img src="/mga-logo.jfif" alt="MGA" />
           <div>
@@ -519,6 +537,9 @@ function App() {
           {syncing ? 'Conectando' : pendingSync > 0 ? 'Pendiente' : 'Al dia'}
           {pendingSync > 0 && <span>{pendingSync}</span>}
         </button>
+        <button className="chrome-icon" aria-label="Mas opciones" type="button">
+          <MoreVertical size={21} />
+        </button>
       </header>
 
       {message && <div className="toast">{message}</div>}
@@ -527,7 +548,7 @@ function App() {
         <form className="workspace" onSubmit={saveRecord}>
           <aside className="side-panel">
             <div className="capture-badge">
-              <ClipboardCheck size={18} /> Captura de turno
+              <Mountain size={18} /> Operacion mina
             </div>
             <h1>{editingId ? 'Editar captura' : 'Nueva captura'}</h1>
             <p>Registra la operacion en campo. La app guarda sin internet y envia los datos automaticamente cuando detecta red.</p>
@@ -536,14 +557,48 @@ function App() {
               <strong>{syncing ? 'Sincronizando' : pendingSync > 0 ? `${pendingSync} por enviar` : 'Datos al dia'}</strong>
             </div>
             <div className="record-tabs">
-              <button type="button" className={formType === 'barrenacion' ? 'active' : ''} onClick={() => selectFormType('barrenacion')}>
-                <HardHat size={18} /> Barrenacion y voladuras
+              <button
+                type="button"
+                className={`module-card module-red ${formType === 'barrenacion' ? 'active' : ''}`}
+                onClick={() => selectFormType('barrenacion')}
+              >
+                <span className="module-icon"><Drill size={24} /></span>
+                <span className="module-title">Barrenos</span>
+                <span className="module-subtitle">Voladuras</span>
+                <span className="module-ring"><strong>{recordCounts.barrenacion}</strong><small>reg.</small></span>
               </button>
-              <button type="button" className={formType === 'rezagado' ? 'active' : ''} onClick={() => selectFormType('rezagado')}>
-                <Activity size={18} /> Rezagado retro
+              <button
+                type="button"
+                className={`module-card module-blue ${formType === 'rezagado' ? 'active' : ''}`}
+                onClick={() => selectFormType('rezagado')}
+              >
+                <span className="module-icon"><Truck size={24} /></span>
+                <span className="module-title">Rezagado</span>
+                <span className="module-subtitle">Scoop / retro</span>
+                <span className="module-ring"><strong>{recordCounts.rezagado}</strong><small>reg.</small></span>
               </button>
-              <button type="button" className={formType === 'seguridad' ? 'active' : ''} onClick={() => selectFormType('seguridad')}>
-                <ShieldCheck size={18} /> Seguridad
+              <button
+                type="button"
+                className={`module-card module-yellow ${formType === 'seguridad' ? 'active' : ''}`}
+                onClick={() => selectFormType('seguridad')}
+              >
+                <span className="module-icon"><ShieldCheck size={24} /></span>
+                <span className="module-title">Seguridad</span>
+                <span className="module-subtitle">Incidentes</span>
+                <span className="module-ring"><strong>{recordCounts.seguridad}</strong><small>reg.</small></span>
+              </button>
+              <button
+                type="button"
+                className="module-card module-green"
+                onClick={() => {
+                  setSection('dashboard')
+                  void syncRecords({ silent: true })
+                }}
+              >
+                <span className="module-icon"><Pickaxe size={24} /></span>
+                <span className="module-title">Revision</span>
+                <span className="module-subtitle">KPI / reportes</span>
+                <span className="module-ring"><strong>{recordCounts.total}</strong><small>total</small></span>
               </button>
             </div>
             <button className="primary-action" type="submit">
