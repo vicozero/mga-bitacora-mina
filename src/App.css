@@ -1015,14 +1015,17 @@ textarea:focus {
 
 .message-composer {
   align-items: stretch;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .message-composer input {
+  flex: 0 1 170px;
   max-width: 170px;
 }
 
 .message-composer textarea {
+  flex: 1 1 260px;
   min-height: 44px;
 }
 
@@ -1047,12 +1050,111 @@ textarea:focus {
   color: #fff;
 }
 
-.send-message {
+.message-send-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.send-message,
+.whatsapp-message {
   justify-content: center;
   min-width: 118px;
+}
+
+.send-message {
   background: #007b83;
   border-color: #007b83;
   color: #fff;
+}
+
+.whatsapp-message {
+  background: #1fa855;
+  border-color: #1fa855;
+  color: #fff;
+}
+
+.chat-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(10, 20, 28, 0.28);
+  box-shadow: none;
+  transform: none;
+}
+
+.chat-panel-backdrop:hover {
+  border: 0;
+  box-shadow: none;
+  transform: none;
+}
+
+.floating-chat-button {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 38;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #007b83;
+  color: #fff;
+  box-shadow: 0 18px 34px rgba(0, 78, 84, 0.26);
+}
+
+.floating-chat-button span {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #d63c3c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.floating-message-panel {
+  position: fixed;
+  right: 22px;
+  bottom: 92px;
+  z-index: 48;
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 120px));
+  overflow: auto;
+  border-radius: 10px;
+  box-shadow: 0 28px 70px rgba(10, 22, 32, 0.28);
+}
+
+.floating-message-panel .message-center {
+  margin: 0;
+  border-color: #bfd3dc;
+}
+
+.floating-panel-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: inline-flex;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: #fff;
 }
 
 .message-list {
@@ -1442,7 +1544,17 @@ th {
   }
 
   .message-composer input {
+    flex: none;
     max-width: none;
+  }
+
+  .message-composer textarea {
+    flex: none;
+  }
+
+  .message-send-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .message-type-tabs {
@@ -1499,6 +1611,22 @@ th {
 
   .inline-action {
     width: 100%;
+  }
+
+  .floating-chat-button {
+    right: 18px;
+    bottom: 88px;
+    width: 54px;
+    height: 54px;
+    z-index: 28;
+  }
+
+  .floating-message-panel {
+    right: 10px;
+    bottom: 88px;
+    left: 10px;
+    width: auto;
+    max-height: calc(100vh - 112px);
   }
 
   .mobile-bottom-nav {

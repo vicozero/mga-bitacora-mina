@@ -191,6 +191,7 @@ type ChatMessage = {
 const STORAGE_KEY = 'mga-bitacora-operaciones-v1'
 const MESSAGE_STORAGE_KEY = 'mga-bitacora-messages-v1'
 const API_URL_KEY = 'mga-bitacora-api-url'
+const WHATSAPP_NUMBER_KEY = 'mga-bitacora-whatsapp-number'
 const DEFAULT_API_URL = 'https://mga-bitacora-mina.onrender.com'
 const BARRENACION_TEMPLATE = '/templates/barrenacion-voladuras.pdf'
 const REZAGADO_TEMPLATE = '/templates/rezagado.pdf'
@@ -357,6 +358,7 @@ function App() {
   const [chatType, setChatType] = useState<ChatMessageType>('aviso')
   const [chatAuthor, setChatAuthor] = useState('')
   const [chatText, setChatText] = useState('')
+  const [whatsNumber, setWhatsNumber] = useState(loadWhatsAppNumber)
   const [query, setQuery] = useState('')
   const [message, setMessage] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -364,6 +366,7 @@ function App() {
   const [apiUrl, setApiUrl] = useState(loadApiUrl)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
+  const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const reportRef = useRef<HTMLDivElement>(null)
 
   const visibleRecords = useMemo(() => records.filter((record) => !record.deletedAt), [records])
@@ -403,6 +406,10 @@ function App() {
   }, [apiUrl])
 
   useEffect(() => {
+    localStorage.setItem(WHATSAPP_NUMBER_KEY, whatsNumber)
+  }, [whatsNumber])
+
+  useEffect(() => {
     void syncRecords({ silent: true })
     void syncMessages({ silent: true })
     const handleOnline = () => {
@@ -420,6 +427,7 @@ function App() {
       if (event.key === 'Escape') {
         setDrawerOpen(false)
         setActionsOpen(false)
+        setChatPanelOpen(false)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -440,10 +448,14 @@ function App() {
     return normalized
   }
 
-  function sendChatMessage(event: FormEvent) {
-    event.preventDefault()
+  function publishChatMessage(options: { openWhatsApp?: boolean } = {}) {
     const text = chatText.trim()
     if (!text) return
+    const whatsappTarget = normalizeWhatsAppNumber(whatsNumber)
+    if (options.openWhatsApp && !whatsappTarget) {
+      setMessage('Agrega un numero de WhatsApp con lada para enviar el aviso.')
+      return
+    }
     const now = nowIso()
     const nextMessage = normalizeChatMessage({
       id: crypto.randomUUID(),
@@ -455,8 +467,30 @@ function App() {
     })
     const persisted = persistMessages([nextMessage, ...chatMessages])
     setChatText('')
-    setMessage('Mensaje guardado y listo para sincronizar.')
+    setMessage(options.openWhatsApp ? 'Aviso publicado. Abriendo WhatsApp.' : 'Mensaje guardado y listo para sincronizar.')
+    if (options.openWhatsApp && whatsappTarget) openWhatsAppMessage(nextMessage, whatsappTarget)
     void syncMessages({ silent: true, sourceMessages: persisted })
+  }
+
+  function sendChatMessage(event: FormEvent) {
+    event.preventDefault()
+    publishChatMessage()
+  }
+
+  function sendWhatsAppNotice() {
+    publishChatMessage({ openWhatsApp: true })
+  }
+
+  function openWhatsAppMessage(item: ChatMessage, phone: string) {
+    const publicUrl = resolveApiBase(apiUrl)
+    const text = [
+      'MGA Bitacora Mina',
+      `${labelChatType(item.type)}: ${item.text}`,
+      `Envia: ${item.author}`,
+      `Fecha: ${formatDateTime(item.createdAt)}`,
+      `Panel: ${publicUrl}`,
+    ].join('\n')
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer')
   }
 
   async function syncMessages(options: { silent?: boolean; sourceMessages?: ChatMessage[] } = {}) {
@@ -746,6 +780,14 @@ function App() {
             <small>Limpia el formulario actual</small>
           </button>
           <button type="button" onClick={() => {
+            setChatPanelOpen(true)
+            closeMenus()
+          }}>
+            <MessageSquare size={20} />
+            <span>Centro de mensajes</span>
+            <small>{pendingMessages > 0 ? `${pendingMessages} pendientes` : 'Avisos y comunicados'}</small>
+          </button>
+          <button type="button" onClick={() => {
             closeMenus()
             void syncRecords()
           }}>
@@ -769,6 +811,12 @@ function App() {
           </button>
           <button type="button" onClick={goToDashboard}>
             <LayoutDashboard size={18} /> Revision web
+          </button>
+          <button type="button" onClick={() => {
+            setChatPanelOpen(true)
+            closeMenus()
+          }}>
+            <MessageSquare size={18} /> Centro de mensajes
           </button>
           <label className="file-button menu-file">
             <Upload size={18} /> Importar respaldo
@@ -931,67 +979,22 @@ function App() {
             </div>
           </div>
 
-          <section className="message-center" data-html2canvas-ignore="true">
-            <div className="message-head">
-              <div>
-                <span><MessageSquare size={18} /> Centro de mensajes</span>
-                <h2>Avisos y comunicados</h2>
-              </div>
-              <button type="button" onClick={() => void syncMessages()} disabled={syncing}>
-                <RefreshCw size={16} className={syncing ? 'spin' : ''} />
-                {pendingMessages > 0 ? `${pendingMessages} pendientes` : 'Al dia'}
-              </button>
-            </div>
-            <form className="message-composer" onSubmit={sendChatMessage}>
-              <div className="message-type-tabs" aria-label="Tipo de mensaje">
-                {(['aviso', 'mensaje', 'urgente'] as const).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    className={chatType === type ? 'active' : ''}
-                    onClick={() => setChatType(type)}
-                  >
-                    {type === 'aviso' && <Bell size={16} />}
-                    {type === 'mensaje' && <MessageSquare size={16} />}
-                    {type === 'urgente' && <ShieldCheck size={16} />}
-                    {labelChatType(type)}
-                  </button>
-                ))}
-              </div>
-              <input
-                aria-label="Nombre de quien envia"
-                placeholder="Nombre"
-                value={chatAuthor}
-                onChange={(event) => setChatAuthor(event.target.value)}
-              />
-              <textarea
-                aria-label="Mensaje"
-                placeholder="Escribe un aviso para el equipo..."
-                value={chatText}
-                onChange={(event) => setChatText(event.target.value)}
-                rows={3}
-              />
-              <button className="send-message" type="submit">
-                <Send size={17} /> Publicar
-              </button>
-            </form>
-            <div className="message-list">
-              {latestMessages.length === 0 ? (
-                <p>No hay mensajes todavia.</p>
-              ) : (
-                latestMessages.map((item) => (
-                  <article className={`message-item ${item.type}`} key={item.id}>
-                    <div>
-                      <span>{labelChatType(item.type)}</span>
-                      <strong>{item.author}</strong>
-                      <time>{formatDateTime(item.createdAt)}</time>
-                    </div>
-                    <p>{item.text}</p>
-                  </article>
-                ))
-              )}
-            </div>
-          </section>
+          <MessageCenter
+            chatAuthor={chatAuthor}
+            chatText={chatText}
+            chatType={chatType}
+            latestMessages={latestMessages}
+            pendingMessages={pendingMessages}
+            setChatAuthor={setChatAuthor}
+            setChatText={setChatText}
+            setChatType={setChatType}
+            setWhatsNumber={setWhatsNumber}
+            syncing={syncing}
+            whatsNumber={whatsNumber}
+            onSubmit={sendChatMessage}
+            onSync={() => void syncMessages()}
+            onWhatsApp={sendWhatsAppNotice}
+          />
 
           <div ref={reportRef} className="report-page">
             <div className="report-header">
@@ -1082,6 +1085,41 @@ function App() {
           </div>
         </section>
       )}
+      {chatPanelOpen && (
+        <>
+          <button className="chat-panel-backdrop" type="button" aria-label="Cerrar centro de mensajes" onClick={() => setChatPanelOpen(false)} />
+          <aside className="floating-message-panel" aria-label="Centro de mensajes flotante">
+            <button className="floating-panel-close" type="button" onClick={() => setChatPanelOpen(false)} aria-label="Cerrar centro de mensajes">
+              <X size={18} />
+            </button>
+            <MessageCenter
+              chatAuthor={chatAuthor}
+              chatText={chatText}
+              chatType={chatType}
+              latestMessages={latestMessages}
+              pendingMessages={pendingMessages}
+              setChatAuthor={setChatAuthor}
+              setChatText={setChatText}
+              setChatType={setChatType}
+              setWhatsNumber={setWhatsNumber}
+              syncing={syncing}
+              whatsNumber={whatsNumber}
+              onSubmit={sendChatMessage}
+              onSync={() => void syncMessages()}
+              onWhatsApp={sendWhatsAppNotice}
+            />
+          </aside>
+        </>
+      )}
+      <button
+        className="floating-chat-button"
+        type="button"
+        aria-label="Abrir centro de mensajes"
+        onClick={() => setChatPanelOpen(true)}
+      >
+        <MessageSquare size={24} />
+        {pendingMessages > 0 && <span>{pendingMessages}</span>}
+      </button>
       <nav className="mobile-bottom-nav" aria-label="Acciones rapidas">
         <button className={section === 'captura' ? 'active' : ''} type="button" onClick={goToCapture}>
           <ClipboardCheck size={20} />
@@ -1108,6 +1146,114 @@ function App() {
         </button>
       </nav>
     </main>
+  )
+}
+
+function MessageCenter({
+  chatAuthor,
+  chatText,
+  chatType,
+  latestMessages,
+  pendingMessages,
+  setChatAuthor,
+  setChatText,
+  setChatType,
+  setWhatsNumber,
+  syncing,
+  whatsNumber,
+  onSubmit,
+  onSync,
+  onWhatsApp,
+}: {
+  chatAuthor: string
+  chatText: string
+  chatType: ChatMessageType
+  latestMessages: ChatMessage[]
+  pendingMessages: number
+  setChatAuthor: (value: string) => void
+  setChatText: (value: string) => void
+  setChatType: (value: ChatMessageType) => void
+  setWhatsNumber: (value: string) => void
+  syncing: boolean
+  whatsNumber: string
+  onSubmit: (event: FormEvent) => void
+  onSync: () => void
+  onWhatsApp: () => void
+}) {
+  return (
+    <section className="message-center" data-html2canvas-ignore="true">
+      <div className="message-head">
+        <div>
+          <span><MessageSquare size={18} /> Centro de mensajes</span>
+          <h2>Avisos y comunicados</h2>
+        </div>
+        <button type="button" onClick={onSync} disabled={syncing}>
+          <RefreshCw size={16} className={syncing ? 'spin' : ''} />
+          {pendingMessages > 0 ? `${pendingMessages} pendientes` : 'Al dia'}
+        </button>
+      </div>
+      <form className="message-composer" onSubmit={onSubmit}>
+        <div className="message-type-tabs" aria-label="Tipo de mensaje">
+          {(['aviso', 'mensaje', 'urgente'] as const).map((type) => (
+            <button
+              key={type}
+              type="button"
+              className={chatType === type ? 'active' : ''}
+              onClick={() => setChatType(type)}
+            >
+              {type === 'aviso' && <Bell size={16} />}
+              {type === 'mensaje' && <MessageSquare size={16} />}
+              {type === 'urgente' && <ShieldCheck size={16} />}
+              {labelChatType(type)}
+            </button>
+          ))}
+        </div>
+        <input
+          aria-label="Nombre de quien envia"
+          placeholder="Nombre"
+          value={chatAuthor}
+          onChange={(event) => setChatAuthor(event.target.value)}
+        />
+        <input
+          aria-label="Numero de WhatsApp"
+          inputMode="tel"
+          placeholder="WhatsApp con lada"
+          value={whatsNumber}
+          onChange={(event) => setWhatsNumber(event.target.value)}
+        />
+        <textarea
+          aria-label="Mensaje"
+          placeholder="Escribe un aviso para el equipo..."
+          value={chatText}
+          onChange={(event) => setChatText(event.target.value)}
+          rows={3}
+        />
+        <div className="message-send-actions">
+          <button className="send-message" type="submit">
+            <Send size={17} /> Publicar
+          </button>
+          <button className="whatsapp-message" type="button" onClick={onWhatsApp}>
+            <MessageSquare size={17} /> WhatsApp
+          </button>
+        </div>
+      </form>
+      <div className="message-list">
+        {latestMessages.length === 0 ? (
+          <p>No hay mensajes todavia.</p>
+        ) : (
+          latestMessages.map((item) => (
+            <article className={`message-item ${item.type}`} key={item.id}>
+              <div>
+                <span>{labelChatType(item.type)}</span>
+                <strong>{item.author}</strong>
+                <time>{formatDateTime(item.createdAt)}</time>
+              </div>
+              <p>{item.text}</p>
+            </article>
+          ))
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -2067,6 +2213,17 @@ function getInitialSection(): 'captura' | 'dashboard' {
 
 function loadApiUrl() {
   return localStorage.getItem(API_URL_KEY) ?? import.meta.env.VITE_API_URL ?? DEFAULT_API_URL
+}
+
+function loadWhatsAppNumber() {
+  return localStorage.getItem(WHATSAPP_NUMBER_KEY) ?? ''
+}
+
+function normalizeWhatsAppNumber(value: string) {
+  const digits = value.replace(/\D/g, '')
+  if (digits.length === 10) return `52${digits}`
+  if (digits.length >= 11 && digits.length <= 15) return digits
+  return ''
 }
 
 function resolveApiBase(apiUrl: string) {
