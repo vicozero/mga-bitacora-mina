@@ -11,6 +11,7 @@ import {
   FileDown,
   HardHat,
   History,
+  Home,
   LayoutDashboard,
   Menu,
   MessageSquare,
@@ -41,6 +42,7 @@ import {
 import './App.css'
 
 type Shift = '1' | '2'
+type AppSection = 'home' | 'captura' | 'dashboard'
 type RecordType = 'barrenacion' | 'rezagado' | 'seguridad'
 type BarrenacionActivity = 'jumbo' | 'maquinaPierna' | 'voladura'
 type RezagadoEquipment = 'scoop' | 'retro'
@@ -348,7 +350,7 @@ const makeSeguridad = (): SeguridadRecord => {
 }
 
 function App() {
-  const [section, setSection] = useState<'captura' | 'dashboard'>(getInitialSection)
+  const [section, setSection] = useState<AppSection>(getInitialSection)
   const [formType, setFormType] = useState<RecordType>('barrenacion')
   const [barrenacion, setBarrenacion] = useState<BarrenacionRecord>(makeBarrenacion)
   const [rezagado, setRezagado] = useState<RezagadoRecord>(makeRezagado)
@@ -576,7 +578,18 @@ function App() {
     setActionsOpen(false)
   }
 
+  function goHome() {
+    setSection('home')
+    closeMenus()
+  }
+
   function goToCapture() {
+    setSection('captura')
+    closeMenus()
+  }
+
+  function openCapture(type: RecordType) {
+    selectFormType(type)
     setSection('captura')
     closeMenus()
   }
@@ -702,7 +715,7 @@ function App() {
   }
 
   return (
-    <main className={`app-shell ${section === 'captura' ? 'capture-mode' : 'review-mode'}`}>
+    <main className={`app-shell ${section === 'captura' ? 'capture-mode' : section === 'dashboard' ? 'review-mode' : 'home-mode'}`}>
       <header className="topbar">
         <button
           className="chrome-icon"
@@ -724,6 +737,9 @@ function App() {
           </div>
         </div>
         <nav className="mode-tabs" aria-label="Vista principal">
+          <button className={section === 'home' ? 'active' : ''} onClick={goHome}>
+            <Home size={18} /> Inicio
+          </button>
           <button className={section === 'captura' ? 'active' : ''} onClick={goToCapture}>
             <ClipboardCheck size={18} /> Captura
           </button>
@@ -764,6 +780,11 @@ function App() {
               <strong>Panel de captura</strong>
             </div>
           </div>
+          <button className={section === 'home' ? 'active' : ''} type="button" onClick={goHome}>
+            <Home size={20} />
+            <span>Inicio</span>
+            <small>Menu de modulos</small>
+          </button>
           <button className={section === 'captura' ? 'active' : ''} type="button" onClick={goToCapture}>
             <ClipboardCheck size={20} />
             <span>Captura de campo</span>
@@ -800,6 +821,9 @@ function App() {
 
       {actionsOpen && (
         <div className="actions-menu open">
+          <button type="button" onClick={goHome}>
+            <Home size={18} /> Inicio
+          </button>
           <button type="button" onClick={startNewCapture}>
             <Edit3 size={18} /> Nueva captura
           </button>
@@ -854,7 +878,19 @@ function App() {
         </div>
       )}
 
-      {section === 'captura' ? (
+      {section === 'home' ? (
+        <HomeScreen
+          pendingMessages={pendingMessages}
+          pendingSync={pendingSync}
+          recordCounts={recordCounts}
+          syncing={syncing}
+          onDashboard={goToDashboard}
+          onMessages={() => setChatPanelOpen(true)}
+          onNewCapture={startNewCapture}
+          onOpenCapture={openCapture}
+          onSync={() => void syncRecords()}
+        />
+      ) : section === 'captura' ? (
         <form id="capture-form" className="workspace" onSubmit={saveRecord}>
           <aside className="side-panel">
             <div className="capture-badge">
@@ -943,6 +979,7 @@ function App() {
           </aside>
 
           <section className="form-panel">
+            <CaptureFlowNav formType={formType} />
             {formType === 'barrenacion' && (
               <BarrenacionForm record={barrenacion} setRecord={setBarrenacion} />
             )}
@@ -1121,9 +1158,9 @@ function App() {
         {pendingMessages > 0 && <span>{pendingMessages}</span>}
       </button>
       <nav className="mobile-bottom-nav" aria-label="Acciones rapidas">
-        <button className={section === 'captura' ? 'active' : ''} type="button" onClick={goToCapture}>
-          <ClipboardCheck size={20} />
-          <span>Captura</span>
+        <button className={section === 'home' ? 'active' : ''} type="button" onClick={goHome}>
+          <Home size={20} />
+          <span>Inicio</span>
         </button>
         {section === 'captura' ? (
           <button type="submit" form="capture-form">
@@ -1131,22 +1168,148 @@ function App() {
             <span>Guardar</span>
           </button>
         ) : (
-          <button type="button" onClick={startNewCapture}>
-            <Edit3 size={20} />
-            <span>Nueva</span>
+          <button type="button" onClick={goToCapture}>
+            <ClipboardCheck size={20} />
+            <span>Captura</span>
           </button>
         )}
+        <button type="button" onClick={() => setChatPanelOpen(true)}>
+          <MessageSquare size={20} />
+          <span>Mensajes</span>
+        </button>
         <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
           <LayoutDashboard size={20} />
           <span>Revision</span>
         </button>
-        <button type="button" onClick={() => void syncRecords()}>
-          <RefreshCw size={20} className={syncing ? 'spin' : ''} />
-          <span>Sync</span>
-        </button>
       </nav>
     </main>
   )
+}
+
+function HomeScreen({
+  pendingMessages,
+  pendingSync,
+  recordCounts,
+  syncing,
+  onDashboard,
+  onMessages,
+  onNewCapture,
+  onOpenCapture,
+  onSync,
+}: {
+  pendingMessages: number
+  pendingSync: number
+  recordCounts: { barrenacion: number; rezagado: number; seguridad: number; total: number }
+  syncing: boolean
+  onDashboard: () => void
+  onMessages: () => void
+  onNewCapture: () => void
+  onOpenCapture: (type: RecordType) => void
+  onSync: () => void
+}) {
+  return (
+    <section className="home-screen">
+      <div className="home-hero">
+        <img src="/mga-logo.jfif" alt="MGA" />
+        <div>
+          <span>Operacion mina</span>
+          <h1>Modulos</h1>
+          <p>Elige una tarea y captura solo el bloque necesario.</p>
+        </div>
+      </div>
+
+      <div className="module-launch-grid" aria-label="Modulos principales">
+        <button className="launch-card launch-red" type="button" onClick={() => onOpenCapture('barrenacion')}>
+          <span><Drill size={30} /></span>
+          <strong>Barrenos</strong>
+          <small>{recordCounts.barrenacion} registros</small>
+        </button>
+        <button className="launch-card launch-cyan" type="button" onClick={() => onOpenCapture('rezagado')}>
+          <span><Truck size={30} /></span>
+          <strong>Rezagado</strong>
+          <small>{recordCounts.rezagado} registros</small>
+        </button>
+        <button className="launch-card launch-amber" type="button" onClick={() => onOpenCapture('seguridad')}>
+          <span><ShieldCheck size={30} /></span>
+          <strong>Seguridad</strong>
+          <small>{recordCounts.seguridad} registros</small>
+        </button>
+        <button className="launch-card launch-green" type="button" onClick={onDashboard}>
+          <span><LayoutDashboard size={30} /></span>
+          <strong>Revision</strong>
+          <small>KPI y reportes</small>
+        </button>
+        <button className="launch-card launch-violet" type="button" onClick={onMessages}>
+          <span><MessageSquare size={30} /></span>
+          <strong>Mensajes</strong>
+          <small>{pendingMessages > 0 ? `${pendingMessages} pendientes` : 'Avisos'}</small>
+        </button>
+        <button className="launch-card launch-blue" type="button" onClick={onSync}>
+          <span><RefreshCw size={30} className={syncing ? 'spin' : ''} /></span>
+          <strong>Sincronizar</strong>
+          <small>{pendingSync > 0 ? `${pendingSync} por enviar` : 'Al dia'}</small>
+        </button>
+        <button className="launch-card launch-slate" type="button" onClick={onNewCapture}>
+          <span><Edit3 size={30} /></span>
+          <strong>Nueva</strong>
+          <small>Limpiar captura</small>
+        </button>
+        <button className="launch-card launch-teal" type="button" onClick={onDashboard}>
+          <span><FileDown size={30} /></span>
+          <strong>Formatos</strong>
+          <small>PDF / Excel</small>
+        </button>
+      </div>
+
+      <div className="home-summary">
+        <article>
+          <span>Total capturas</span>
+          <strong>{recordCounts.total}</strong>
+        </article>
+        <article>
+          <span>Sincronizacion</span>
+          <strong>{pendingSync > 0 ? `${pendingSync} pendientes` : 'Al dia'}</strong>
+        </article>
+      </div>
+    </section>
+  )
+}
+
+function CaptureFlowNav({ formType }: { formType: RecordType }) {
+  const steps = formType === 'barrenacion'
+    ? [
+        ['capture-turno', 'Turno', Mountain] as const,
+        ['capture-actividad', 'Actividad', Drill] as const,
+        ['capture-produccion', 'Produccion', Pickaxe] as const,
+        ['capture-cierre', 'Cierre', ClipboardCheck] as const,
+      ]
+    : formType === 'rezagado'
+      ? [
+          ['capture-turno', 'Turno', Mountain] as const,
+          ['capture-equipo', 'Equipo', Truck] as const,
+          ['capture-trabajo', 'Trabajo', Activity] as const,
+          ['capture-cierre', 'Cierre', ClipboardCheck] as const,
+        ]
+      : [
+          ['capture-turno', 'Turno', Mountain] as const,
+          ['capture-resumen', 'Resumen', ShieldCheck] as const,
+          ['capture-hallazgo', 'Hallazgo', ClipboardCheck] as const,
+        ]
+
+  return (
+    <div className="capture-flow-nav" aria-label="Pasos de captura">
+      {steps.map(([target, label, Icon]) => (
+        <button key={target} type="button" onClick={() => scrollToCaptureSection(target)}>
+          <Icon size={17} />
+          <span>{label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function scrollToCaptureSection(target: string) {
+  document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function MessageCenter({
@@ -1342,10 +1505,10 @@ function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; set
   return (
     <>
       <PanelTitle title="Captura de turno barrenacion y voladuras" subtitle="Varios equipos por supervisor" />
-      <QuickSection title="Turno" icon={<Mountain size={18} />}>
+      <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
         <BaseFields record={record} setRecord={setRecord} />
       </QuickSection>
-      <QuickSection title="Actividad" icon={<Drill size={18} />}>
+      <QuickSection title="Actividad" icon={<Drill size={18} />} anchorId="capture-actividad">
         <div className="quick-choice-grid three">
           <ChoiceButton active={activity === 'jumbo'} icon={<Drill size={21} />} label="Jumbo" meta={`${record.jumbo.length || 1} filas`} onClick={() => selectActivity('jumbo')} />
           <ChoiceButton active={activity === 'maquinaPierna'} icon={<HardHat size={21} />} label="Maquina pierna" meta={`${record.maquinaPierna.length || 1} filas`} onClick={() => selectActivity('maquinaPierna')} />
@@ -1354,7 +1517,7 @@ function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; set
       </QuickSection>
 
       {activity === 'voladura' ? (
-        <QuickSection title="Voladuras del turno" icon={<Activity size={18} />}>
+        <QuickSection title="Voladuras del turno" icon={<Activity size={18} />} anchorId="capture-produccion">
           <div className="section-heading">
             <h2>Filas de voladura</h2>
             <button className="inline-action" type="button" onClick={addBlast}>
@@ -1396,7 +1559,7 @@ function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; set
           ))}
         </QuickSection>
       ) : (
-        <QuickSection title={activity === 'jumbo' ? 'Jumbos del turno' : 'Maquina pierna del turno'} icon={<Pickaxe size={18} />}>
+        <QuickSection title={activity === 'jumbo' ? 'Jumbos del turno' : 'Maquina pierna del turno'} icon={<Pickaxe size={18} />} anchorId="capture-produccion">
           <div className="section-heading">
             <h2>{activity === 'jumbo' ? 'Filas de jumbo' : 'Filas de maquina pierna'}</h2>
             <button className="inline-action" type="button" onClick={() => addDrill(activity)}>
@@ -1446,7 +1609,7 @@ function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; set
         </QuickSection>
       )}
 
-      <QuickSection title="Apoyo y cierre del turno" icon={<ClipboardCheck size={18} />}>
+      <QuickSection title="Apoyo y cierre del turno" icon={<ClipboardCheck size={18} />} anchorId="capture-cierre">
         <div className="form-grid quick">
           <Field label="Polvorero" value={record.polvorero} onChange={(value) => setRecord({ ...record, polvorero: value })} />
           <Field label="Chofer camion personal" value={record.choferCamion} onChange={(value) => setRecord({ ...record, choferCamion: value })} />
@@ -1511,16 +1674,16 @@ function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord
   return (
     <>
       <PanelTitle title="Captura de turno rezagado" subtitle="Varios equipos y actividades" />
-      <QuickSection title="Turno" icon={<Mountain size={18} />}>
+      <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
         <BaseFields record={record} setRecord={setRecord} />
       </QuickSection>
-      <QuickSection title="Equipo" icon={<Truck size={18} />}>
+      <QuickSection title="Equipo" icon={<Truck size={18} />} anchorId="capture-equipo">
         <div className="quick-choice-grid two">
           <ChoiceButton active={equipment === 'scoop'} icon={<Truck size={21} />} label="Scoop tram" meta={`${record.scoopTram.length || 1} filas`} onClick={() => selectEquipment('scoop')} />
           <ChoiceButton active={equipment === 'retro'} icon={<HardHat size={21} />} label="Retro" meta={`${record.retro.length || 1} filas`} onClick={() => selectEquipment('retro')} />
         </div>
       </QuickSection>
-      <QuickSection title="Trabajo" icon={<Activity size={18} />}>
+      <QuickSection title="Trabajo" icon={<Activity size={18} />} anchorId="capture-trabajo">
         {equipment === 'scoop' ? (
           <>
             <div className="section-heading">
@@ -1623,7 +1786,9 @@ function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord
           </>
         )}
       </QuickSection>
-      <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+      <QuickSection title="Cierre" icon={<ClipboardCheck size={18} />} anchorId="capture-cierre">
+        <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+      </QuickSection>
     </>
   )
 }
@@ -1632,17 +1797,17 @@ function SeguridadForm({ record, setRecord }: { record: SeguridadRecord; setReco
   return (
     <>
       <PanelTitle title="Captura rapida de seguridad" subtitle="Eventos y acciones preventivas" />
-      <QuickSection title="Turno" icon={<Mountain size={18} />}>
+      <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
         <BaseFields record={record} setRecord={setRecord} />
       </QuickSection>
-      <QuickSection title="Resumen" icon={<ShieldCheck size={18} />}>
+      <QuickSection title="Resumen" icon={<ShieldCheck size={18} />} anchorId="capture-resumen">
         <div className="form-grid quick">
           <Field label="Accidentes" type="number" value={record.accidentes} onChange={(value) => setRecord({ ...record, accidentes: Number(value) })} />
           <Field label="Incidentes" type="number" value={record.incidentes} onChange={(value) => setRecord({ ...record, incidentes: Number(value) })} />
           <Field label="Fuerza laboral" type="number" value={record.fuerzaLaboral} onChange={(value) => setRecord({ ...record, fuerzaLaboral: Number(value) })} />
         </div>
       </QuickSection>
-      <QuickSection title="Hallazgo" icon={<ClipboardCheck size={18} />}>
+      <QuickSection title="Hallazgo" icon={<ClipboardCheck size={18} />} anchorId="capture-hallazgo">
         <TextArea label="Acto o condicion insegura" value={record.actosInseguros} onChange={(value) => setRecord({ ...record, actosInseguros: value })} />
         <TextArea label="Accion correctiva" value={record.correccionesMejoras} onChange={(value) => setRecord({ ...record, correccionesMejoras: value })} />
         <details className="quick-details">
@@ -1657,9 +1822,9 @@ function SeguridadForm({ record, setRecord }: { record: SeguridadRecord; setReco
   )
 }
 
-function QuickSection({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
+function QuickSection({ title, icon, children, anchorId }: { title: string; icon: ReactNode; children: ReactNode; anchorId?: string }) {
   return (
-    <section className="quick-section">
+    <section className="quick-section" id={anchorId}>
       <div className="quick-section-title">
         <span>{icon}</span>
         <h2>{title}</h2>
@@ -2203,12 +2368,13 @@ function loadChatMessages(): ChatMessage[] {
   }
 }
 
-function getInitialSection(): 'captura' | 'dashboard' {
+function getInitialSection(): AppSection {
   const params = new URLSearchParams(window.location.search)
   const requestedView = params.get('vista')
+  if (requestedView === 'inicio' || requestedView === 'home') return 'home'
   if (requestedView === 'captura') return 'captura'
   if (requestedView === 'revision' || requestedView === 'dashboard') return 'dashboard'
-  return Capacitor.isNativePlatform() ? 'captura' : 'dashboard'
+  return Capacitor.isNativePlatform() ? 'home' : 'dashboard'
 }
 
 function loadApiUrl() {
