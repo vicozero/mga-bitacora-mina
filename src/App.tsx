@@ -42,7 +42,7 @@ import {
 import './App.css'
 
 type Shift = '1' | '2'
-type AppSection = 'home' | 'captura' | 'dashboard'
+type AppSection = 'home' | 'captura' | 'historial' | 'dashboard'
 type RecordType = 'barrenacion' | 'rezagado' | 'seguridad'
 type BarrenacionActivity = 'jumbo' | 'maquinaPierna' | 'voladura'
 type RezagadoEquipment = 'scoop' | 'retro'
@@ -370,6 +370,7 @@ function App() {
   const [actionsOpen, setActionsOpen] = useState(false)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const reportRef = useRef<HTMLDivElement>(null)
+  const isApk = Capacitor.isNativePlatform()
 
   const visibleRecords = useMemo(() => records.filter((record) => !record.deletedAt), [records])
   const filtered = useMemo(() => {
@@ -401,6 +402,7 @@ function App() {
     () => chatMessages.filter((item) => item.updatedAt !== item.syncedAt).length,
     [chatMessages],
   )
+  const pendingTotal = pendingSync + pendingMessages
   const latestMessages = useMemo(() => chatMessages.slice(0, 8), [chatMessages])
 
   useEffect(() => {
@@ -410,19 +412,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem(WHATSAPP_NUMBER_KEY, whatsNumber)
   }, [whatsNumber])
-
-  useEffect(() => {
-    void syncRecords({ silent: true })
-    void syncMessages({ silent: true })
-    const handleOnline = () => {
-      void syncRecords({ silent: true })
-      void syncMessages({ silent: true })
-    }
-    window.addEventListener('online', handleOnline)
-    return () => window.removeEventListener('online', handleOnline)
-    // The initial sync must run once on startup; saves trigger their own sync with fresh records.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -467,11 +456,10 @@ function App() {
       createdAt: now,
       updatedAt: now,
     })
-    const persisted = persistMessages([nextMessage, ...chatMessages])
+    persistMessages([nextMessage, ...chatMessages])
     setChatText('')
-    setMessage(options.openWhatsApp ? 'Aviso publicado. Abriendo WhatsApp.' : 'Mensaje guardado y listo para sincronizar.')
+    setMessage(options.openWhatsApp ? 'Aviso guardado localmente. Abriendo WhatsApp.' : 'Mensaje guardado localmente. Usa Sincronizar para enviarlo a red.')
     if (options.openWhatsApp && whatsappTarget) openWhatsAppMessage(nextMessage, whatsappTarget)
-    void syncMessages({ silent: true, sourceMessages: persisted })
   }
 
   function sendChatMessage(event: FormEvent) {
@@ -498,7 +486,7 @@ function App() {
   async function syncMessages(options: { silent?: boolean; sourceMessages?: ChatMessage[] } = {}) {
     const apiBase = resolveApiBase(apiUrl)
     if (!apiBase || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-      if (!options.silent) setMessage('Sin internet. Los mensajes se enviaran automaticamente.')
+      if (!options.silent) setMessage('Sin internet. Los mensajes quedan guardados localmente; vuelve a presionar Sincronizar cuando haya red.')
       return
     }
     try {
@@ -518,8 +506,13 @@ function App() {
       )
       if (!options.silent) setMessage('Centro de mensajes sincronizado.')
     } catch {
-      if (!options.silent) setMessage('No se pudieron sincronizar los mensajes. Se reintentara automaticamente.')
+      if (!options.silent) setMessage('No se pudieron sincronizar los mensajes. Siguen guardados localmente.')
     }
+  }
+
+  async function syncAll() {
+    await syncRecords()
+    await syncMessages()
   }
 
   function saveRecord(event: FormEvent) {
@@ -535,11 +528,10 @@ function App() {
     const next = editingId
       ? records.map((record) => (record.id === editingId ? updated : record))
       : [updated, ...records]
-    const persisted = persist(next)
+    persist(next)
     resetForm(formType)
     setEditingId(null)
-    setMessage(editingId ? 'Captura actualizada offline.' : 'Registro guardado offline en este dispositivo.')
-    void syncRecords({ silent: true, sourceRecords: persisted })
+    setMessage(editingId ? 'Captura actualizada en el historial local.' : 'Registro guardado en el historial local de este dispositivo.')
   }
 
   function resetForm(type: RecordType) {
@@ -588,6 +580,11 @@ function App() {
     closeMenus()
   }
 
+  function goToHistory() {
+    setSection('historial')
+    closeMenus()
+  }
+
   function openCapture(type: RecordType) {
     selectFormType(type)
     setSection('captura')
@@ -595,9 +592,13 @@ function App() {
   }
 
   function goToDashboard() {
+    if (isApk) {
+      setSection('historial')
+      closeMenus()
+      return
+    }
     setSection('dashboard')
     closeMenus()
-    void syncRecords({ silent: true })
   }
 
   function startNewCapture() {
@@ -610,32 +611,30 @@ function App() {
 
   function removeRecord(id: string) {
     const deletedAt = nowIso()
-    const persisted = persist(
+    persist(
       records.map((record) =>
         record.id === id
           ? normalizeRecord({ ...record, deletedAt, updatedAt: deletedAt, syncedAt: undefined } as MineRecord)
           : record,
       ),
     )
-    setMessage('Captura eliminada localmente.')
-    void syncRecords({ silent: true, sourceRecords: persisted })
+    setMessage('Captura eliminada del historial local. Usa Sincronizar para reflejarlo en red.')
   }
 
   async function importJson(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
     const imported = JSON.parse(await file.text()) as MineRecord[]
-    const persisted = persist([...imported.map(normalizeRecord), ...records])
-    setMessage('Datos importados al panel local.')
+    persist([...imported.map(normalizeRecord), ...records])
+    setMessage('Datos importados al historial local.')
     closeMenus()
-    void syncRecords({ silent: true, sourceRecords: persisted })
     event.target.value = ''
   }
 
   async function syncRecords(options: { silent?: boolean; sourceRecords?: MineRecord[] } = {}) {
     const apiBase = resolveApiBase(apiUrl)
     if (!apiBase || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-      if (!options.silent) setMessage('Sin internet. La captura queda guardada y se enviara automaticamente.')
+      if (!options.silent) setMessage('Sin internet. La bitacora queda guardada en este dispositivo; vuelve a presionar Sincronizar cuando haya red.')
       return
     }
     setSyncing(true)
@@ -657,7 +656,7 @@ function App() {
       )
       if (!options.silent) setMessage('Sincronizacion completada con Render.')
     } catch {
-      if (!options.silent) setMessage('No se pudo sincronizar. Se reintentara automaticamente cuando haya red.')
+      if (!options.silent) setMessage('No se pudo sincronizar. Los registros siguen guardados localmente.')
     } finally {
       setSyncing(false)
     }
@@ -715,7 +714,7 @@ function App() {
   }
 
   return (
-    <main className={`app-shell ${section === 'captura' ? 'capture-mode' : section === 'dashboard' ? 'review-mode' : 'home-mode'}`}>
+    <main className={`app-shell ${section === 'captura' ? 'capture-mode' : section === 'dashboard' || section === 'historial' ? 'review-mode' : 'home-mode'}`}>
       <header className="topbar">
         <button
           className="chrome-icon"
@@ -743,17 +742,22 @@ function App() {
           <button className={section === 'captura' ? 'active' : ''} onClick={goToCapture}>
             <ClipboardCheck size={18} /> Captura
           </button>
-          <button
-            className={section === 'dashboard' ? 'active' : ''}
-            onClick={goToDashboard}
-          >
-            <LayoutDashboard size={18} /> Revision web
+          <button className={section === 'historial' ? 'active' : ''} onClick={goToHistory}>
+            <History size={18} /> Historial
           </button>
+          {!isApk && (
+            <button
+              className={section === 'dashboard' ? 'active' : ''}
+              onClick={goToDashboard}
+            >
+              <LayoutDashboard size={18} /> Revision web
+            </button>
+          )}
         </nav>
-        <button className="sync-button" onClick={() => void syncRecords()} disabled={syncing}>
+        <button className="sync-button" onClick={() => void syncAll()} disabled={syncing}>
           <RefreshCw size={18} className={syncing ? 'spin' : ''} />
-          {syncing ? 'Conectando' : pendingSync > 0 ? 'Pendiente' : 'Al dia'}
-          {pendingSync > 0 && <span>{pendingSync}</span>}
+          {syncing ? 'Conectando' : pendingTotal > 0 ? 'Pendiente' : 'Al dia'}
+          {pendingTotal > 0 && <span>{pendingTotal}</span>}
         </button>
         <button
           className="chrome-icon"
@@ -790,11 +794,18 @@ function App() {
             <span>Captura de campo</span>
             <small>Registro rapido offline</small>
           </button>
-          <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
-            <LayoutDashboard size={20} />
-            <span>Revision web</span>
-            <small>KPI, reportes y descargas</small>
+          <button className={section === 'historial' ? 'active' : ''} type="button" onClick={goToHistory}>
+            <History size={20} />
+            <span>Historial local</span>
+            <small>Bitacora guardada en el equipo</small>
           </button>
+          {!isApk && (
+            <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
+              <LayoutDashboard size={20} />
+              <span>Revision web</span>
+              <small>KPI, reportes y descargas</small>
+            </button>
+          )}
           <button type="button" onClick={startNewCapture}>
             <Edit3 size={20} />
             <span>Nueva captura</span>
@@ -810,11 +821,11 @@ function App() {
           </button>
           <button type="button" onClick={() => {
             closeMenus()
-            void syncRecords()
+            void syncAll()
           }}>
             <RefreshCw size={20} className={syncing ? 'spin' : ''} />
             <span>Sincronizar</span>
-            <small>{pendingSync > 0 ? `${pendingSync} pendientes` : 'Datos al dia'}</small>
+            <small>{pendingTotal > 0 ? `${pendingTotal} pendientes` : 'Datos al dia'}</small>
           </button>
         </aside>
       )}
@@ -827,15 +838,20 @@ function App() {
           <button type="button" onClick={startNewCapture}>
             <Edit3 size={18} /> Nueva captura
           </button>
+          <button type="button" onClick={goToHistory}>
+            <History size={18} /> Historial local
+          </button>
           <button type="button" onClick={() => {
             closeMenus()
-            void syncRecords()
+            void syncAll()
           }}>
             <RefreshCw size={18} className={syncing ? 'spin' : ''} /> Sincronizar
           </button>
-          <button type="button" onClick={goToDashboard}>
-            <LayoutDashboard size={18} /> Revision web
-          </button>
+          {!isApk && (
+            <button type="button" onClick={goToDashboard}>
+              <LayoutDashboard size={18} /> Revision web
+            </button>
+          )}
           <button type="button" onClick={() => {
             setChatPanelOpen(true)
             closeMenus()
@@ -866,7 +882,7 @@ function App() {
       )}
 
       {message && <div className="toast">{message}</div>}
-      {editingId && section === 'dashboard' && (
+      {editingId && section !== 'captura' && (
         <div className="edit-banner">
           <span>Hay una captura en edicion.</span>
           <button type="button" onClick={goToCapture}>
@@ -881,14 +897,16 @@ function App() {
       {section === 'home' ? (
         <HomeScreen
           pendingMessages={pendingMessages}
-          pendingSync={pendingSync}
+          pendingSync={pendingTotal}
           recordCounts={recordCounts}
+          showDashboard={!isApk}
           syncing={syncing}
           onDashboard={goToDashboard}
+          onHistory={goToHistory}
           onMessages={() => setChatPanelOpen(true)}
           onNewCapture={startNewCapture}
           onOpenCapture={openCapture}
-          onSync={() => void syncRecords()}
+          onSync={() => void syncAll()}
         />
       ) : section === 'captura' ? (
         <form id="capture-form" className="workspace" onSubmit={saveRecord}>
@@ -897,10 +915,14 @@ function App() {
               <Mountain size={18} /> Operacion mina
             </div>
             <h1>{editingId ? 'Editar captura' : 'Nueva captura'}</h1>
-            <p>Captura un evento de campo con los datos clave. El reporte completo se arma en la revision web.</p>
+            <p>
+              {isApk
+                ? 'Captura un evento de campo con los datos clave. Todo queda en el historial local y se envia a red solo al sincronizar.'
+                : 'Captura un evento de campo con los datos clave. El reporte completo se arma en la revision web.'}
+            </p>
             <div className="connection-card">
-              <span>Conexion automatica</span>
-              <strong>{syncing ? 'Sincronizando' : pendingSync > 0 ? `${pendingSync} por enviar` : 'Datos al dia'}</strong>
+              <span>Sincronizacion manual</span>
+              <strong>{syncing ? 'Sincronizando' : pendingSync > 0 ? `${pendingSync} por enviar` : 'Historial local al dia'}</strong>
             </div>
             <div className="record-tabs">
               <button
@@ -933,19 +955,20 @@ function App() {
                 <span className="module-subtitle">Incidentes</span>
                 <span className="module-ring"><strong>{recordCounts.seguridad}</strong><small>reg.</small></span>
               </button>
-              <button
-                type="button"
-                className="module-card module-green"
-                onClick={() => {
-                  setSection('dashboard')
-                  void syncRecords({ silent: true })
-                }}
-              >
-                <span className="module-icon"><Pickaxe size={24} /></span>
-                <span className="module-title">Revision</span>
-                <span className="module-subtitle">KPI / reportes</span>
-                <span className="module-ring"><strong>{recordCounts.total}</strong><small>total</small></span>
-              </button>
+              {!isApk && (
+                <button
+                  type="button"
+                  className="module-card module-green"
+                  onClick={() => {
+                    setSection('dashboard')
+                  }}
+                >
+                  <span className="module-icon"><Pickaxe size={24} /></span>
+                  <span className="module-title">Revision</span>
+                  <span className="module-subtitle">KPI / reportes</span>
+                  <span className="module-ring"><strong>{recordCounts.total}</strong><small>total</small></span>
+                </button>
+              )}
             </div>
             <button className="primary-action" type="submit">
               <Save size={18} /> {editingId ? 'Guardar cambios' : 'Guardar registro'}
@@ -987,6 +1010,22 @@ function App() {
             {formType === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} />}
           </section>
         </form>
+      ) : section === 'historial' ? (
+        <HistoryScreen
+          filtered={filtered}
+          kpis={kpis}
+          pendingSync={pendingSync}
+          query={query}
+          syncing={syncing}
+          totalRecords={recordCounts.total}
+          onDelete={removeRecord}
+          onEdit={startEdit}
+          onExportExcel={exportRecordExcel}
+          onExportPdf={exportRecordPdf}
+          onNewCapture={startNewCapture}
+          onQueryChange={setQuery}
+          onSync={() => void syncAll()}
+        />
       ) : (
         <section className="dashboard">
           <div className="dashboard-tools">
@@ -1007,7 +1046,7 @@ function App() {
                 value={apiUrl}
                 onChange={(event) => setApiUrl(event.target.value)}
               />
-              <button onClick={() => void syncRecords()} disabled={syncing}>
+              <button onClick={() => void syncAll()} disabled={syncing}>
                 <RefreshCw size={18} className={syncing ? 'spin' : ''} /> Sincronizar
               </button>
               <button onClick={exportPdf}>
@@ -1177,10 +1216,16 @@ function App() {
           <MessageSquare size={20} />
           <span>Mensajes</span>
         </button>
-        <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
-          <LayoutDashboard size={20} />
-          <span>Revision</span>
+        <button className={section === 'historial' ? 'active' : ''} type="button" onClick={goToHistory}>
+          <History size={20} />
+          <span>Historial</span>
         </button>
+        {!isApk && (
+          <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
+            <LayoutDashboard size={20} />
+            <span>Revision</span>
+          </button>
+        )}
       </nav>
     </main>
   )
@@ -1190,8 +1235,10 @@ function HomeScreen({
   pendingMessages,
   pendingSync,
   recordCounts,
+  showDashboard,
   syncing,
   onDashboard,
+  onHistory,
   onMessages,
   onNewCapture,
   onOpenCapture,
@@ -1200,8 +1247,10 @@ function HomeScreen({
   pendingMessages: number
   pendingSync: number
   recordCounts: { barrenacion: number; rezagado: number; seguridad: number; total: number }
+  showDashboard: boolean
   syncing: boolean
   onDashboard: () => void
+  onHistory: () => void
   onMessages: () => void
   onNewCapture: () => void
   onOpenCapture: (type: RecordType) => void
@@ -1234,11 +1283,18 @@ function HomeScreen({
           <strong>Seguridad</strong>
           <small>{recordCounts.seguridad} registros</small>
         </button>
-        <button className="launch-card launch-green" type="button" onClick={onDashboard}>
-          <span><LayoutDashboard size={30} /></span>
-          <strong>Revision</strong>
-          <small>KPI y reportes</small>
+        <button className="launch-card launch-green" type="button" onClick={onHistory}>
+          <span><History size={30} /></span>
+          <strong>Historial</strong>
+          <small>{recordCounts.total} locales</small>
         </button>
+        {showDashboard && (
+          <button className="launch-card launch-teal" type="button" onClick={onDashboard}>
+            <span><LayoutDashboard size={30} /></span>
+            <strong>Revision</strong>
+            <small>KPI y reportes</small>
+          </button>
+        )}
         <button className="launch-card launch-violet" type="button" onClick={onMessages}>
           <span><MessageSquare size={30} /></span>
           <strong>Mensajes</strong>
@@ -1254,11 +1310,13 @@ function HomeScreen({
           <strong>Nueva</strong>
           <small>Limpiar captura</small>
         </button>
-        <button className="launch-card launch-teal" type="button" onClick={onDashboard}>
-          <span><FileDown size={30} /></span>
-          <strong>Formatos</strong>
-          <small>PDF / Excel</small>
-        </button>
+        {showDashboard && (
+          <button className="launch-card launch-green" type="button" onClick={onDashboard}>
+            <span><FileDown size={30} /></span>
+            <strong>Formatos</strong>
+            <small>PDF / Excel</small>
+          </button>
+        )}
       </div>
 
       <div className="home-summary">
@@ -1270,6 +1328,111 @@ function HomeScreen({
           <span>Sincronizacion</span>
           <strong>{pendingSync > 0 ? `${pendingSync} pendientes` : 'Al dia'}</strong>
         </article>
+      </div>
+    </section>
+  )
+}
+
+function HistoryScreen({
+  filtered,
+  kpis,
+  pendingSync,
+  query,
+  syncing,
+  totalRecords,
+  onDelete,
+  onEdit,
+  onExportExcel,
+  onExportPdf,
+  onNewCapture,
+  onQueryChange,
+  onSync,
+}: {
+  filtered: MineRecord[]
+  kpis: ReturnType<typeof computeKpis>
+  pendingSync: number
+  query: string
+  syncing: boolean
+  totalRecords: number
+  onDelete: (id: string) => void
+  onEdit: (record: MineRecord) => void
+  onExportExcel: (record: MineRecord) => Promise<void>
+  onExportPdf: (record: MineRecord) => Promise<void>
+  onNewCapture: () => void
+  onQueryChange: (value: string) => void
+  onSync: () => void
+}) {
+  return (
+    <section className="history-screen">
+      <div className="history-head">
+        <div>
+          <span>Historial offline</span>
+          <h1>Historial de bitacora</h1>
+          <p>Todos los registros se quedan en este dispositivo para revision. La red solo se actualiza al presionar Sincronizar.</p>
+        </div>
+        <button type="button" onClick={onSync} disabled={syncing}>
+          <RefreshCw size={18} className={syncing ? 'spin' : ''} />
+          {pendingSync > 0 ? `Sincronizar ${pendingSync}` : 'Sincronizar'}
+        </button>
+      </div>
+
+      <div className="history-tools">
+        <input
+          aria-label="Buscar historial"
+          placeholder="Buscar por fecha, supervisor, turno, unidad..."
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+        />
+        <button type="button" onClick={onNewCapture}>
+          <Plus size={18} /> Nueva captura
+        </button>
+      </div>
+
+      <div className="history-kpis">
+        <Kpi icon={<History />} label="Registros locales" value={totalRecords} />
+        <Kpi icon={<RefreshCw />} label="Pendientes red" value={pendingSync} />
+        <Kpi icon={<BarChart3 />} label="Metros barrenados" value={kpis.metrosDados} />
+        <Kpi icon={<HardHat />} label="Cucharones" value={kpis.rezagado} />
+      </div>
+
+      <div className="history-list">
+        {filtered.length === 0 ? (
+          <article className="history-empty">
+            <strong>Sin registros para mostrar</strong>
+            <p>Cuando guardes una captura, aparecera aqui aunque no haya internet.</p>
+          </article>
+        ) : (
+          filtered.map((record) => (
+            <article className="history-record-card" key={record.id}>
+              <div>
+                <span>{labelType(record.type)}</span>
+                <strong>{record.fecha} - Turno {record.turno}</strong>
+                <small>{record.supervisor || 'Supervisor pendiente'} - {record.unidad}</small>
+              </div>
+              <span className={record.updatedAt === record.syncedAt ? 'status-pill synced' : 'status-pill'}>
+                {record.updatedAt === record.syncedAt ? 'En red' : 'Local'}
+              </span>
+              <div className="history-actions">
+                {record.type !== 'seguridad' && (
+                  <>
+                    <button type="button" onClick={() => void onExportPdf(record)}>
+                      <FileDown size={16} /> PDF
+                    </button>
+                    <button type="button" onClick={() => void onExportExcel(record)}>
+                      <FileSpreadsheet size={16} /> Excel
+                    </button>
+                  </>
+                )}
+                <button type="button" onClick={() => onEdit(record)}>
+                  <Edit3 size={16} /> Editar
+                </button>
+                <button className="danger" type="button" onClick={() => onDelete(record.id)}>
+                  <Trash2 size={16} /> Eliminar
+                </button>
+              </div>
+            </article>
+          ))
+        )}
       </div>
     </section>
   )
@@ -2371,10 +2534,13 @@ function loadChatMessages(): ChatMessage[] {
 function getInitialSection(): AppSection {
   const params = new URLSearchParams(window.location.search)
   const requestedView = params.get('vista')
+  const isApk = Capacitor.isNativePlatform()
   if (requestedView === 'inicio' || requestedView === 'home') return 'home'
   if (requestedView === 'captura') return 'captura'
-  if (requestedView === 'revision' || requestedView === 'dashboard') return 'dashboard'
-  return Capacitor.isNativePlatform() ? 'home' : 'dashboard'
+  if (requestedView === 'historial' || requestedView === 'bitacora') return 'historial'
+  if (isApk && (requestedView === 'revision' || requestedView === 'dashboard')) return 'historial'
+  if (!isApk && (requestedView === 'revision' || requestedView === 'dashboard')) return 'dashboard'
+  return isApk ? 'home' : 'dashboard'
 }
 
 function loadApiUrl() {
