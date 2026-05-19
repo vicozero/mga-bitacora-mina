@@ -13,12 +13,15 @@ import {
   FileSpreadsheet,
   FileDown,
   Flag,
+  Fingerprint,
   Gauge,
   HardHat,
   History,
+  KeyRound,
   Home,
   LayoutDashboard,
   Lock,
+  LogOut,
   MapPin,
   Menu,
   Mic,
@@ -37,7 +40,9 @@ import {
   Trash2,
   Truck,
   Upload,
+  UserPlus,
   UserRound,
+  Users,
   X,
 } from 'lucide-react'
 import { Capacitor, registerPlugin } from '@capacitor/core'
@@ -54,11 +59,13 @@ import {
 import './App.css'
 
 type Shift = '1' | '2'
-type AppSection = 'home' | 'captura' | 'historial' | 'dashboard' | 'catalogo'
+type AppSection = 'home' | 'captura' | 'historial' | 'dashboard' | 'catalogo' | 'usuarios'
 type CaptureMode = 'modulo' | 'turno'
 type CaptureLayout = 'asistente' | 'formulario'
 type RecordType = 'barrenacion' | 'rezagado' | 'seguridad'
 type UserRole = 'supervisor' | 'administrador' | 'gerencia'
+type AuthMethod = 'pin' | 'password' | 'biometric'
+type AuditAction = 'created' | 'updated' | 'deleted' | 'closed' | 'synced'
 type BarrenacionActivity = 'jumbo' | 'maquinaPierna' | 'voladura'
 type RezagadoEquipment = 'scoop' | 'retro'
 type ShiftTemplateId = 'barrenacionNormal' | 'voladura' | 'rezagado' | 'turnoMixto' | 'emergencia'
@@ -112,6 +119,12 @@ type MgaSpeechPlugin = {
 }
 
 const MgaSpeech = registerPlugin<MgaSpeechPlugin>('MgaSpeech')
+type MgaBiometricPlugin = {
+  isAvailable: () => Promise<{ available: boolean; reason?: string }>
+  authenticate: (options?: { title?: string; subtitle?: string }) => Promise<{ verified: boolean }>
+}
+
+const MgaBiometric = registerPlugin<MgaBiometricPlugin>('MgaBiometric')
 
 declare global {
   interface Window {
@@ -210,6 +223,18 @@ type LocationSnapshot = {
   capturedAt: string
 }
 
+type AuditEvent = {
+  id: string
+  action: AuditAction
+  at: string
+  userId: string
+  username: string
+  displayName: string
+  role: UserRole
+  deviceId: string
+  note?: string
+}
+
 type BaseRecord = {
   id: string
   type: RecordType
@@ -228,6 +253,14 @@ type BaseRecord = {
   closedAt?: string
   closedBy?: string
   handoffNotes?: string
+  createdByUserId?: string
+  createdByName?: string
+  updatedByUserId?: string
+  updatedByName?: string
+  deletedByUserId?: string
+  deletedByName?: string
+  deviceId?: string
+  auditTrail?: AuditEvent[]
 }
 
 type BarrenacionRecord = BaseRecord & {
@@ -273,6 +306,26 @@ type SeguridadRecord = BaseRecord & {
 type MineRecord = BarrenacionRecord | RezagadoRecord | SeguridadRecord
 type ShiftBase = Pick<BaseRecord, 'supervisor' | 'fecha' | 'turno' | 'unidad'>
 type TurnoModules = Record<RecordType, boolean>
+type AppUser = {
+  id: string
+  username: string
+  displayName: string
+  supervisorName: string
+  role: UserRole
+  pinHash?: string
+  passwordHash?: string
+  biometricEnabled?: boolean
+  active: boolean
+  createdAt: string
+  updatedAt: string
+  syncedAt?: string
+  deletedAt?: string
+}
+type UserSession = {
+  userId: string
+  loginAt: string
+  method: AuthMethod
+}
 type CaptureTemplateSnapshot = {
   captureMode: CaptureMode
   captureLayout: CaptureLayout
@@ -346,6 +399,7 @@ type EquipmentSummary = {
 }
 
 type EquipmentTimelineItem = {
+  key: string
   equipo: string
   tipo: string
   fecha: string
@@ -403,6 +457,9 @@ const WHATSAPP_NUMBER_KEY = 'mga-bitacora-whatsapp-number'
 const OPERATOR_MODE_KEY = 'mga-bitacora-operator-mode'
 const ROLE_KEY = 'mga-bitacora-role'
 const CATALOG_KEY = 'mga-bitacora-catalog-v1'
+const USERS_KEY = 'mga-bitacora-users-v1'
+const SESSION_KEY = 'mga-bitacora-session-v1'
+const DEVICE_ID_KEY = 'mga-bitacora-device-id'
 const DEFAULT_API_URL = 'https://mga-bitacora-mina.onrender.com'
 const BARRENACION_TEMPLATE = '/templates/barrenacion-voladuras.pdf'
 const REZAGADO_TEMPLATE = '/templates/rezagado.pdf'
@@ -476,6 +533,20 @@ const defaultCatalog: CatalogState = {
   retro: retroEquipoOptions,
   operadores: [],
   niveles: [],
+}
+
+const defaultAdminUser: AppUser = {
+  id: 'admin-local',
+  username: 'admin',
+  displayName: 'Administrador MGA',
+  supervisorName: 'Administrador MGA',
+  role: 'administrador',
+  pinHash: '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4',
+  passwordHash: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
+  biometricEnabled: true,
+  active: true,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
 }
 
 const nowIso = () => new Date().toISOString()
@@ -621,6 +692,8 @@ const makeSeguridad = (): SeguridadRecord => {
 
 function App() {
   const initialDraft = useMemo(loadCaptureDraft, [])
+  const initialUsers = useMemo(loadUsers, [])
+  const deviceId = useMemo(loadDeviceId, [])
   const [section, setSection] = useState<AppSection>(getInitialSection)
   const [captureMode, setCaptureMode] = useState<CaptureMode>(initialDraft?.captureMode ?? 'modulo')
   const [captureLayout, setCaptureLayout] = useState<CaptureLayout>(initialDraft?.captureLayout ?? 'asistente')
@@ -632,6 +705,8 @@ function App() {
   const [seguridad, setSeguridad] = useState<SeguridadRecord>(() => initialDraft?.seguridad ?? makeSeguridad())
   const [records, setRecords] = useState<MineRecord[]>(loadRecords)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(loadChatMessages)
+  const [users, setUsers] = useState<AppUser[]>(initialUsers)
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => loadSessionUser(initialUsers))
   const [chatType, setChatType] = useState<ChatMessageType>('aviso')
   const [chatAuthor, setChatAuthor] = useState('')
   const [chatText, setChatText] = useState('')
@@ -643,7 +718,7 @@ function App() {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [apiUrl, setApiUrl] = useState(loadApiUrl)
   const [operatorMode, setOperatorMode] = useState(loadOperatorMode)
-  const [activeRole, setActiveRole] = useState<UserRole>(loadUserRole)
+  const [activeRole, setActiveRole] = useState<UserRole>(() => loadSessionUser(initialUsers)?.role ?? loadUserRole())
   const [catalog, setCatalog] = useState<CatalogState>(loadCatalog)
   const [closeTurnoOnSave, setCloseTurnoOnSave] = useState(false)
   const [templateUndo, setTemplateUndo] = useState<CaptureTemplateSnapshot | null>(null)
@@ -653,7 +728,13 @@ function App() {
   const reportRef = useRef<HTMLDivElement>(null)
   const isApk = Capacitor.isNativePlatform()
 
-  const visibleRecords = useMemo(() => records.filter((record) => !record.deletedAt), [records])
+  const activeUsers = useMemo(() => users.filter((user) => user.active && !user.deletedAt), [users])
+  const pendingUsers = useMemo(() => users.filter((user) => user.updatedAt !== user.syncedAt).length, [users])
+  const allVisibleRecords = useMemo(() => records.filter((record) => !record.deletedAt), [records])
+  const visibleRecords = useMemo(
+    () => allVisibleRecords.filter((record) => canViewRecord(currentUser, record)),
+    [allVisibleRecords, currentUser],
+  )
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase()
     if (!term) return visibleRecords
@@ -683,7 +764,7 @@ function App() {
     () => chatMessages.filter((item) => item.updatedAt !== item.syncedAt).length,
     [chatMessages],
   )
-  const pendingTotal = pendingSync + pendingMessages
+  const pendingTotal = pendingSync + pendingMessages + pendingUsers
   const latestMessages = useMemo(() => chatMessages.slice(0, 8), [chatMessages])
   const equipmentFavorites = useMemo(() => buildEquipmentFavorites(visibleRecords), [visibleRecords])
   const equipmentOptions = useMemo(() => ({
@@ -718,6 +799,23 @@ function App() {
   useEffect(() => {
     localStorage.setItem(CATALOG_KEY, JSON.stringify(catalog))
   }, [catalog])
+
+  useEffect(() => {
+    localStorage.setItem(USERS_KEY, JSON.stringify(users))
+  }, [users])
+
+  useEffect(() => {
+    if (!currentUser) return
+    const timeout = window.setTimeout(() => {
+      const supervisor = currentUser.supervisorName || currentUser.displayName
+      setActiveRole(currentUser.role)
+      setTurnoBase((base) => base.supervisor ? base : { ...base, supervisor })
+      setBarrenacion((record) => record.supervisor ? record : { ...record, supervisor })
+      setRezagado((record) => record.supervisor ? record : { ...record, supervisor })
+      setSeguridad((record) => record.supervisor ? record : { ...record, supervisor })
+    }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [currentUser])
 
   useEffect(() => {
     const draft: CaptureDraft = {
@@ -765,6 +863,131 @@ function App() {
     setChatMessages(normalized)
     localStorage.setItem(MESSAGE_STORAGE_KEY, JSON.stringify(normalized))
     return normalized
+  }
+
+  function persistUsers(next: AppUser[]) {
+    const normalized = mergeUsers(next.map(normalizeUser))
+    setUsers(normalized)
+    localStorage.setItem(USERS_KEY, JSON.stringify(normalized))
+    return normalized
+  }
+
+  async function handleLogin(userId: string, method: AuthMethod, secret?: string) {
+    const user = activeUsers.find((item) => item.id === userId)
+    if (!user) {
+      setMessage('Usuario no disponible.')
+      return false
+    }
+    if (method === 'pin' || method === 'password') {
+      const expected = method === 'pin' ? user.pinHash : user.passwordHash
+      if (!expected) {
+        setMessage(method === 'pin' ? 'Este usuario no tiene PIN configurado.' : 'Este usuario no tiene contrasena configurada.')
+        return false
+      }
+      const actual = await hashSecret(secret ?? '')
+      if (actual !== expected) {
+        setMessage('Credencial incorrecta.')
+        return false
+      }
+    }
+    if (method === 'biometric') {
+      if (!user.biometricEnabled) {
+        setMessage('Huella no habilitada para este usuario.')
+        return false
+      }
+      try {
+        const available = await MgaBiometric.isAvailable()
+        if (!available.available) {
+          setMessage(available.reason || 'Huella no disponible en este telefono.')
+          return false
+        }
+        const result = await MgaBiometric.authenticate({
+          title: 'MGA Bitacora Mina',
+          subtitle: `Ingresar como ${user.displayName}`,
+        })
+        if (!result.verified) {
+          setMessage('Huella no verificada.')
+          return false
+        }
+      } catch (error) {
+        setMessage(getAuthErrorMessage(error))
+        return false
+      }
+    }
+    const session: UserSession = { userId: user.id, loginAt: nowIso(), method }
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+    setCurrentUser(user)
+    setActiveRole(user.role)
+    setMessage(`Sesion iniciada: ${user.displayName}.`)
+    return true
+  }
+
+  function logout() {
+    localStorage.removeItem(SESSION_KEY)
+    setCurrentUser(null)
+    setSection('home')
+    setDrawerOpen(false)
+    setActionsOpen(false)
+    setMessage('Sesion cerrada.')
+  }
+
+  async function upsertUser(input: {
+    id?: string
+    username: string
+    displayName: string
+    supervisorName: string
+    role: UserRole
+    pin?: string
+    password?: string
+    biometricEnabled: boolean
+    active: boolean
+  }) {
+    const now = nowIso()
+    const current = input.id ? users.find((user) => user.id === input.id) : undefined
+    const username = input.username.trim().toLowerCase()
+    if (!username || !input.displayName.trim()) {
+      setMessage('Usuario y nombre son obligatorios.')
+      return false
+    }
+    if (users.some((user) => user.username.toLowerCase() === username && user.id !== input.id && !user.deletedAt)) {
+      setMessage('Ese usuario ya existe.')
+      return false
+    }
+    if (!current && (!input.pin || !input.password)) {
+      setMessage('Nuevo usuario requiere PIN y contrasena.')
+      return false
+    }
+    const nextUser = normalizeUser({
+      ...(current ?? {
+        id: crypto.randomUUID(),
+        createdAt: now,
+      }),
+      username,
+      displayName: input.displayName.trim(),
+      supervisorName: input.supervisorName.trim() || input.displayName.trim(),
+      role: input.role,
+      pinHash: input.pin ? await hashSecret(input.pin) : current?.pinHash,
+      passwordHash: input.password ? await hashSecret(input.password) : current?.passwordHash,
+      biometricEnabled: input.biometricEnabled,
+      active: input.active,
+      updatedAt: now,
+      syncedAt: undefined,
+      deletedAt: undefined,
+    } as AppUser)
+    persistUsers([nextUser, ...users.filter((user) => user.id !== nextUser.id)])
+    if (currentUser?.id === nextUser.id) setCurrentUser(nextUser)
+    setMessage(current ? 'Usuario actualizado.' : 'Usuario creado para trabajo offline.')
+    return true
+  }
+
+  function deleteUser(id: string) {
+    if (id === currentUser?.id) {
+      setMessage('No puedes eliminar el usuario con sesion activa.')
+      return
+    }
+    const now = nowIso()
+    persistUsers(users.map((user) => user.id === id ? normalizeUser({ ...user, active: false, deletedAt: now, updatedAt: now, syncedAt: undefined }) : user))
+    setMessage('Usuario desactivado.')
   }
 
   function publishChatMessage(options: { openWhatsApp?: boolean } = {}) {
@@ -838,7 +1061,36 @@ function App() {
     }
   }
 
+  async function syncUsers(options: { silent?: boolean; sourceUsers?: AppUser[] } = {}) {
+    const apiBase = resolveApiBase(apiUrl)
+    if (!apiBase || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      if (!options.silent) setMessage('Sin internet. Los usuarios quedan guardados localmente.')
+      return
+    }
+    try {
+      const localUsers = (options.sourceUsers ?? users).map(normalizeUser)
+      const response = await fetch(`${apiBase}/api/users/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users: localUsers }),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const payload = (await response.json()) as { users: AppUser[] }
+      const merged = mergeUsers([...localUsers, ...payload.users.map(normalizeUser)]).map((user) => ({
+        ...user,
+        syncedAt: user.updatedAt,
+      }))
+      persistUsers(merged)
+      const refreshedUser = currentUser ? merged.find((user) => user.id === currentUser.id && user.active && !user.deletedAt) : undefined
+      if (currentUser && refreshedUser) setCurrentUser(refreshedUser)
+      if (!options.silent) setMessage('Usuarios sincronizados.')
+    } catch {
+      if (!options.silent) setMessage('No se pudieron sincronizar usuarios. Siguen guardados localmente.')
+    }
+  }
+
   async function syncAll() {
+    await syncUsers({ silent: true })
     await syncRecords()
     await syncMessages()
   }
@@ -862,15 +1114,17 @@ function App() {
   }
 
   function saveModuloRecord() {
+    if (!currentUser) return
     const source =
       formType === 'barrenacion' ? barrenacion : formType === 'rezagado' ? rezagado : seguridad
-    const updated = normalizeRecord({
+    const updated = stampRecord(normalizeRecord({
       ...source,
-      role: activeRole,
+      supervisor: source.supervisor || currentUser.supervisorName || currentUser.displayName,
+      role: currentUser.role,
       updatedAt: nowIso(),
       deletedAt: undefined,
       syncedAt: undefined,
-    } as MineRecord)
+    } as MineRecord), editingId ? 'updated' : 'created', currentUser, deviceId)
     const next = editingId
       ? records.map((record) => (record.id === editingId ? updated : record))
       : [updated, ...records]
@@ -881,11 +1135,13 @@ function App() {
   }
 
   function saveTurnoCompleto(closeTurno = false) {
+    if (!currentUser) return
     const selectedRecords: MineRecord[] = []
     const updatedAt = nowIso()
-    if (turnoModules.barrenacion) selectedRecords.push(applyShiftBase(barrenacion, turnoBase, updatedAt, activeRole, closeTurno))
-    if (turnoModules.rezagado) selectedRecords.push(applyShiftBase(rezagado, turnoBase, updatedAt, activeRole, closeTurno))
-    if (turnoModules.seguridad) selectedRecords.push(applyShiftBase(seguridad, turnoBase, updatedAt, activeRole, closeTurno))
+    const baseWithUser = { ...turnoBase, supervisor: turnoBase.supervisor || currentUser.supervisorName || currentUser.displayName }
+    if (turnoModules.barrenacion) selectedRecords.push(stampRecord(applyShiftBase(barrenacion, baseWithUser, updatedAt, currentUser.role, closeTurno), closeTurno ? 'closed' : 'created', currentUser, deviceId))
+    if (turnoModules.rezagado) selectedRecords.push(stampRecord(applyShiftBase(rezagado, baseWithUser, updatedAt, currentUser.role, closeTurno), closeTurno ? 'closed' : 'created', currentUser, deviceId))
+    if (turnoModules.seguridad) selectedRecords.push(stampRecord(applyShiftBase(seguridad, baseWithUser, updatedAt, currentUser.role, closeTurno), closeTurno ? 'closed' : 'created', currentUser, deviceId))
     if (selectedRecords.length === 0) {
       setMessage('Selecciona al menos un modulo del turno antes de guardar.')
       return
@@ -974,6 +1230,10 @@ function App() {
   }
 
   function startEdit(record: MineRecord) {
+    if (!canEditRecord(currentUser, record)) {
+      setMessage('Tu usuario no tiene permiso para editar esta captura.')
+      return
+    }
     const cleanRecord = { ...record, deletedAt: undefined } as MineRecord
     setCaptureMode('modulo')
     setFormType(record.type)
@@ -1011,6 +1271,12 @@ function App() {
   }
 
   function goToCapture() {
+    if (!canCapture(currentUser)) {
+      setSection('dashboard')
+      setMessage('Gerencia solo puede revisar KPI e historial.')
+      closeMenus()
+      return
+    }
     setCaptureMode('modulo')
     setSection('captura')
     closeMenus()
@@ -1022,11 +1288,28 @@ function App() {
   }
 
   function goToCatalog() {
+    if (!canManageCatalog(currentUser)) {
+      setMessage('Solo administracion puede modificar el catalogo.')
+      return
+    }
     setSection('catalogo')
     closeMenus()
   }
 
+  function goToUsers() {
+    if (!canManageUsers(currentUser)) {
+      setMessage('Solo administracion puede modificar usuarios.')
+      return
+    }
+    setSection('usuarios')
+    closeMenus()
+  }
+
   function openCapture(type: RecordType) {
+    if (!canCapture(currentUser)) {
+      setMessage('Este rol no puede capturar registros.')
+      return
+    }
     selectFormType(type)
     setCaptureMode('modulo')
     setSection('captura')
@@ -1034,6 +1317,10 @@ function App() {
   }
 
   function startTurnoCompleto() {
+    if (!canCapture(currentUser)) {
+      setMessage('Este rol no puede capturar turnos.')
+      return
+    }
     if (editingId) {
       setMessage('Guarda o cancela la edicion antes de abrir turno completo.')
       return
@@ -1075,11 +1362,16 @@ function App() {
   }
 
   function removeRecord(id: string) {
+    const target = records.find((record) => record.id === id)
+    if (!target || !canDeleteRecord(currentUser, target)) {
+      setMessage('Tu usuario no tiene permiso para eliminar esta captura.')
+      return
+    }
     const deletedAt = nowIso()
     persist(
       records.map((record) =>
         record.id === id
-          ? normalizeRecord({ ...record, deletedAt, updatedAt: deletedAt, syncedAt: undefined } as MineRecord)
+          ? stampRecord(normalizeRecord({ ...record, deletedAt, updatedAt: deletedAt, syncedAt: undefined } as MineRecord), 'deleted', currentUser!, deviceId)
           : record,
       ),
     )
@@ -1219,8 +1511,18 @@ function App() {
     setMessage(operatorMode ? 'Modo operador desactivado.' : 'Modo operador activado: controles mas grandes para captura en campo.')
   }
 
+  if (!currentUser) {
+    return (
+      <LoginScreen
+        message={message}
+        users={activeUsers}
+        onLogin={handleLogin}
+      />
+    )
+  }
+
   return (
-    <main className={`app-shell ${operatorMode ? 'operator-mode' : ''} ${section === 'captura' ? 'capture-mode' : section === 'dashboard' || section === 'historial' || section === 'catalogo' ? 'review-mode' : 'home-mode'}`}>
+    <main className={`app-shell ${operatorMode ? 'operator-mode' : ''} ${section === 'captura' ? 'capture-mode' : section === 'dashboard' || section === 'historial' || section === 'catalogo' || section === 'usuarios' ? 'review-mode' : 'home-mode'}`}>
       <header className="topbar">
         <button
           className="chrome-icon"
@@ -1274,14 +1576,11 @@ function App() {
           <Accessibility size={18} />
           <span>Operador</span>
         </button>
-        <label className="role-select" aria-label="Rol de usuario">
+        <div className="role-select user-session-badge" aria-label="Usuario activo">
           <UserRound size={17} />
-          <select value={activeRole} onChange={(event) => setActiveRole(event.target.value as UserRole)}>
-            <option value="supervisor">Supervisor</option>
-            <option value="administrador">Administrador</option>
-            <option value="gerencia">Gerencia</option>
-          </select>
-        </label>
+          <span>{currentUser.displayName}</span>
+          <small>{roleLabel(currentUser.role)}</small>
+        </div>
         <button
           className="chrome-icon"
           aria-expanded={actionsOpen}
@@ -1332,6 +1631,13 @@ function App() {
             <span>Catalogo editable</span>
             <small>Equipos, operadores y obras</small>
           </button>
+          {canManageUsers(currentUser) && (
+            <button className={section === 'usuarios' ? 'active' : ''} type="button" onClick={goToUsers}>
+              <Users size={20} />
+              <span>Usuarios</span>
+              <small>Supervisores, roles y accesos</small>
+            </button>
+          )}
           {hasTurnoDraft && (
             <button type="button" onClick={continueTurno}>
               <ClipboardCheck size={20} />
@@ -1372,6 +1678,11 @@ function App() {
             <span>Sincronizar</span>
             <small>{pendingTotal > 0 ? `${pendingTotal} pendientes` : 'Datos al dia'}</small>
           </button>
+          <button type="button" onClick={logout}>
+            <LogOut size={20} />
+            <span>Cerrar sesion</span>
+            <small>{currentUser.username}</small>
+          </button>
         </aside>
       )}
 
@@ -1394,6 +1705,11 @@ function App() {
           <button type="button" onClick={goToCatalog}>
             <Settings size={18} /> Catalogo
           </button>
+          {canManageUsers(currentUser) && (
+            <button type="button" onClick={goToUsers}>
+              <Users size={18} /> Usuarios
+            </button>
+          )}
           <button type="button" onClick={toggleOperatorMode}>
             <Accessibility size={18} /> {operatorMode ? 'Modo normal' : 'Modo operador'}
           </button>
@@ -1416,6 +1732,9 @@ function App() {
             closeMenus()
           }}>
             <MessageSquare size={18} /> Centro de mensajes
+          </button>
+          <button type="button" onClick={logout}>
+            <LogOut size={18} /> Cerrar sesion
           </button>
           <label className="file-button menu-file">
             <Upload size={18} /> Importar respaldo
@@ -1472,6 +1791,7 @@ function App() {
           recordCounts={recordCounts}
           showDashboard={!isApk}
           syncing={syncing}
+          canManageUsers={canManageUsers(currentUser)}
           onCatalog={goToCatalog}
           onContinueTurno={continueTurno}
           onDashboard={goToDashboard}
@@ -1481,6 +1801,7 @@ function App() {
           onOpenCapture={openCapture}
           onSync={() => void syncAll()}
           onTurnoCompleto={startTurnoCompleto}
+          onUsers={goToUsers}
         />
       ) : section === 'captura' ? (
         <form id="capture-form" className="workspace" onSubmit={saveRecord}>
@@ -1655,7 +1976,23 @@ function App() {
           onSync={() => void syncAll()}
         />
       ) : section === 'catalogo' ? (
-        <CatalogScreen catalog={catalog} setCatalog={setCatalog} />
+        canManageCatalog(currentUser)
+          ? <CatalogScreen catalog={catalog} setCatalog={setCatalog} />
+          : <AccessDeniedScreen title="Catalogo restringido" message="Solo administracion puede modificar equipos, operadores y obras." onHome={goHome} />
+      ) : section === 'usuarios' ? (
+        canManageUsers(currentUser)
+          ? (
+            <UsersScreen
+              currentUser={currentUser}
+              pendingUsers={pendingUsers}
+              syncing={syncing}
+              users={users}
+              onDelete={deleteUser}
+              onSave={(input) => void upsertUser(input)}
+              onSync={() => void syncUsers()}
+            />
+          )
+          : <AccessDeniedScreen title="Usuarios restringidos" message="Solo administracion puede crear supervisores y cambiar accesos." onHome={goHome} />
       ) : (
         <section className="dashboard">
           <div className="dashboard-tools">
@@ -1994,6 +2331,252 @@ function CaptureReadinessCard({ review }: { review: CaptureReview }) {
   )
 }
 
+function LoginScreen({
+  message,
+  users,
+  onLogin,
+}: {
+  message: string
+  users: AppUser[]
+  onLogin: (userId: string, method: AuthMethod, secret?: string) => Promise<boolean>
+}) {
+  const [userId, setUserId] = useState(users[0]?.id ?? '')
+  const [method, setMethod] = useState<AuthMethod>('pin')
+  const [secret, setSecret] = useState('')
+  const [busy, setBusy] = useState(false)
+  const selectedUser = users.find((user) => user.id === userId) ?? users[0]
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedUser) return
+    setBusy(true)
+    const ok = await onLogin(selectedUser.id, method, secret)
+    setBusy(false)
+    if (!ok) setSecret('')
+  }
+
+  return (
+    <main className="login-shell">
+      <section className="login-card">
+        <div className="login-brand">
+          <img src="/mga-logo.jfif" alt="MGA" />
+          <div>
+            <span>MGA Contratista Minera</span>
+            <h1>Acceso a bitacora</h1>
+          </div>
+        </div>
+        <form onSubmit={submit}>
+          <label>
+            Usuario
+            <select value={selectedUser?.id ?? ''} onChange={(event) => setUserId(event.target.value)}>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.displayName} - {roleLabel(user.role)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="login-methods" aria-label="Metodo de acceso">
+            <button className={method === 'pin' ? 'active' : ''} type="button" onClick={() => setMethod('pin')}>
+              <KeyRound size={18} /> PIN
+            </button>
+            <button className={method === 'password' ? 'active' : ''} type="button" onClick={() => setMethod('password')}>
+              <Lock size={18} /> Contrasena
+            </button>
+            <button className={method === 'biometric' ? 'active' : ''} type="button" onClick={() => setMethod('biometric')} disabled={!selectedUser?.biometricEnabled}>
+              <Fingerprint size={18} /> Huella
+            </button>
+          </div>
+          {method !== 'biometric' && (
+            <label>
+              {method === 'pin' ? 'PIN' : 'Contrasena'}
+              <input
+                autoFocus
+                autoComplete={method === 'pin' ? 'one-time-code' : 'current-password'}
+                inputMode={method === 'pin' ? 'numeric' : 'text'}
+                name={method === 'pin' ? 'pin' : 'password'}
+                type={method === 'pin' ? 'password' : 'password'}
+                value={secret}
+                onChange={(event) => setSecret(event.target.value)}
+              />
+            </label>
+          )}
+          <button className="primary-action" type="submit" disabled={busy || !selectedUser}>
+            {method === 'biometric' ? <Fingerprint size={18} /> : <KeyRound size={18} />}
+            {busy ? 'Validando' : 'Entrar'}
+          </button>
+        </form>
+        <div className="login-help">
+          <strong>Primer acceso local</strong>
+          <span>Usuario admin, PIN 1234 o contrasena admin123. Cambialo desde Usuarios.</span>
+        </div>
+        {message && <div className="toast login-toast" role="status">{message}</div>}
+      </section>
+    </main>
+  )
+}
+
+function UsersScreen({
+  currentUser,
+  pendingUsers,
+  syncing,
+  users,
+  onDelete,
+  onSave,
+  onSync,
+}: {
+  currentUser: AppUser
+  pendingUsers: number
+  syncing: boolean
+  users: AppUser[]
+  onDelete: (id: string) => void
+  onSave: (input: {
+    id?: string
+    username: string
+    displayName: string
+    supervisorName: string
+    role: UserRole
+    pin?: string
+    password?: string
+    biometricEnabled: boolean
+    active: boolean
+  }) => void
+  onSync: () => void
+}) {
+  const [editing, setEditing] = useState<AppUser | null>(null)
+  const [form, setForm] = useState({
+    username: '',
+    displayName: '',
+    supervisorName: '',
+    role: 'supervisor' as UserRole,
+    pin: '',
+    password: '',
+    biometricEnabled: true,
+    active: true,
+  })
+  const activeUsers = users.filter((user) => !user.deletedAt)
+
+  function edit(user: AppUser) {
+    setEditing(user)
+    setForm({
+      username: user.username,
+      displayName: user.displayName,
+      supervisorName: user.supervisorName,
+      role: user.role,
+      pin: '',
+      password: '',
+      biometricEnabled: Boolean(user.biometricEnabled),
+      active: user.active,
+    })
+  }
+
+  function reset() {
+    setEditing(null)
+    setForm({
+      username: '',
+      displayName: '',
+      supervisorName: '',
+      role: 'supervisor',
+      pin: '',
+      password: '',
+      biometricEnabled: true,
+      active: true,
+    })
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    onSave({ id: editing?.id, ...form })
+    if (!editing) reset()
+  }
+
+  return (
+    <section className="users-screen">
+      <div className="history-head">
+        <div>
+          <span>Control de acceso</span>
+          <h1>Usuarios y supervisores</h1>
+          <p>Los usuarios quedan disponibles offline en la APK y se sincronizan con Render al tener red.</p>
+        </div>
+        <button onClick={onSync} disabled={syncing}>
+          <RefreshCw size={18} className={syncing ? 'spin' : ''} /> {pendingUsers > 0 ? `${pendingUsers} pendientes` : 'Sincronizar'}
+        </button>
+      </div>
+
+      <div className="users-layout">
+        <form className="user-editor" onSubmit={submit}>
+          <div className="section-heading">
+            <h2>{editing ? 'Editar usuario' : 'Nuevo supervisor'}</h2>
+            {editing && <button type="button" onClick={reset}>Nuevo</button>}
+          </div>
+          <div className="form-grid quick">
+            <Field label="Usuario" autoComplete="username" value={form.username} onChange={(value) => setForm({ ...form, username: value })} required />
+            <Field label="Nombre" autoComplete="name" value={form.displayName} onChange={(value) => setForm({ ...form, displayName: value })} required />
+            <Field label="Supervisor" autoComplete="name" value={form.supervisorName} onChange={(value) => setForm({ ...form, supervisorName: value })} />
+            <label>
+              Rol
+              <select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as UserRole })}>
+                <option value="supervisor">Supervisor</option>
+                <option value="administrador">Administrador</option>
+                <option value="gerencia">Gerencia</option>
+              </select>
+            </label>
+            <Field label={editing ? 'Nuevo PIN' : 'PIN'} type="password" autoComplete="new-password" value={form.pin} onChange={(value) => setForm({ ...form, pin: value })} />
+            <Field label={editing ? 'Nueva contrasena' : 'Contrasena'} type="password" autoComplete="new-password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} />
+          </div>
+          <div className="user-switches">
+            <label>
+              <input type="checkbox" checked={form.biometricEnabled} onChange={(event) => setForm({ ...form, biometricEnabled: event.target.checked })} />
+              Huella habilitada
+            </label>
+            <label>
+              <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
+              Usuario activo
+            </label>
+          </div>
+          <button className="primary-action" type="submit">
+            <UserPlus size={18} /> {editing ? 'Guardar usuario' : 'Crear usuario'}
+          </button>
+        </form>
+
+        <div className="users-list">
+          {activeUsers.map((user) => (
+            <article className={user.active ? '' : 'inactive'} key={user.id}>
+              <div>
+                <span>{roleLabel(user.role)}</span>
+                <strong>{user.displayName}</strong>
+                <small>@{user.username} - {user.supervisorName}</small>
+                <small>{user.biometricEnabled ? 'Huella habilitada' : 'Sin huella'} - {user.updatedAt === user.syncedAt ? 'En red' : 'Pendiente'}</small>
+              </div>
+              <div className="history-actions">
+                <button type="button" onClick={() => edit(user)}>
+                  <Edit3 size={16} /> Editar
+                </button>
+                <button className="danger" type="button" onClick={() => onDelete(user.id)} disabled={user.id === currentUser.id}>
+                  <Trash2 size={16} /> Desactivar
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function AccessDeniedScreen({ title, message, onHome }: { title: string; message: string; onHome: () => void }) {
+  return (
+    <section className="access-denied">
+      <Lock size={34} />
+      <h1>{title}</h1>
+      <p>{message}</p>
+      <button className="primary-action" type="button" onClick={onHome}>
+        <Home size={18} /> Ir a inicio
+      </button>
+    </section>
+  )
+}
+
 function HomeScreen({
   hasTurnoDraft,
   pendingMessages,
@@ -2001,6 +2584,7 @@ function HomeScreen({
   recordCounts,
   showDashboard,
   syncing,
+  canManageUsers,
   onCatalog,
   onContinueTurno,
   onDashboard,
@@ -2010,6 +2594,7 @@ function HomeScreen({
   onOpenCapture,
   onSync,
   onTurnoCompleto,
+  onUsers,
 }: {
   hasTurnoDraft: boolean
   pendingMessages: number
@@ -2017,6 +2602,7 @@ function HomeScreen({
   recordCounts: { barrenacion: number; rezagado: number; seguridad: number; total: number }
   showDashboard: boolean
   syncing: boolean
+  canManageUsers: boolean
   onCatalog: () => void
   onContinueTurno: () => void
   onDashboard: () => void
@@ -2026,6 +2612,7 @@ function HomeScreen({
   onOpenCapture: (type: RecordType) => void
   onSync: () => void
   onTurnoCompleto: () => void
+  onUsers: () => void
 }) {
   return (
     <section className="home-screen">
@@ -2098,6 +2685,13 @@ function HomeScreen({
           <strong>Catalogo</strong>
           <small>Equipos y operadores</small>
         </button>
+        {canManageUsers && (
+          <button className="launch-card launch-teal" type="button" onClick={onUsers}>
+            <span><Users size={30} /></span>
+            <strong>Usuarios</strong>
+            <small>Supervisores y accesos</small>
+          </button>
+        )}
         {showDashboard && (
           <button className="launch-card launch-green" type="button" onClick={onDashboard}>
             <span><FileDown size={30} /></span>
@@ -4560,6 +5154,7 @@ function Field({
   required = false,
   options,
   suggestions,
+  autoComplete,
 }: {
   label: string
   value: string | number
@@ -4568,6 +5163,7 @@ function Field({
   required?: boolean
   options?: string[]
   suggestions?: string[]
+  autoComplete?: string
 }) {
   const textValue = String(value)
   const datalistId = suggestions?.length ? `list-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : undefined
@@ -4587,6 +5183,7 @@ function Field({
       ) : (
         <>
           <input
+            autoComplete={autoComplete ?? (type === 'password' ? 'new-password' : undefined)}
             required={required}
             type={type}
             value={value}
@@ -4692,7 +5289,7 @@ function EquipmentTimeline({ rows }: { rows: EquipmentTimelineItem[] }) {
       ) : (
         <div className="equipment-timeline-list">
           {rows.slice(0, 10).map((row) => (
-            <article className={row.status} key={`${row.tipo}-${row.equipo}-${row.fecha}-${row.turno}-${row.resumen}`}>
+            <article className={row.status} key={row.key}>
               <span>{row.tipo}</span>
               <strong>{row.equipo}</strong>
               <small>{row.fecha} - Turno {row.turno} - {row.supervisor || 'Supervisor pendiente'}</small>
@@ -5171,6 +5768,34 @@ function loadChatMessages(): ChatMessage[] {
   }
 }
 
+function loadUsers(): AppUser[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(USERS_KEY) ?? '[]') as AppUser[]
+    const merged = mergeUsers(stored.map(normalizeUser))
+    return merged.length ? merged : [defaultAdminUser]
+  } catch {
+    return [defaultAdminUser]
+  }
+}
+
+function loadSessionUser(users: AppUser[]) {
+  try {
+    const session = JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null') as UserSession | null
+    if (!session?.userId) return null
+    return users.find((user) => user.id === session.userId && user.active && !user.deletedAt) ?? null
+  } catch {
+    return null
+  }
+}
+
+function loadDeviceId() {
+  const stored = localStorage.getItem(DEVICE_ID_KEY)
+  if (stored) return stored
+  const id = crypto.randomUUID()
+  localStorage.setItem(DEVICE_ID_KEY, id)
+  return id
+}
+
 function getInitialSection(): AppSection {
   const params = new URLSearchParams(window.location.search)
   const requestedView = params.get('vista')
@@ -5179,6 +5804,7 @@ function getInitialSection(): AppSection {
   if (requestedView === 'captura') return 'captura'
   if (requestedView === 'historial' || requestedView === 'bitacora') return 'historial'
   if (requestedView === 'catalogo') return 'catalogo'
+  if (requestedView === 'usuarios') return 'usuarios'
   if (isApk && (requestedView === 'revision' || requestedView === 'dashboard')) return 'historial'
   if (!isApk && (requestedView === 'revision' || requestedView === 'dashboard')) return 'dashboard'
   return isApk ? 'home' : 'dashboard'
@@ -5299,6 +5925,14 @@ function normalizeRecord(record: MineRecord): MineRecord {
     closedAt: typeof record.closedAt === 'string' ? record.closedAt : undefined,
     closedBy: typeof record.closedBy === 'string' ? record.closedBy : undefined,
     handoffNotes: typeof record.handoffNotes === 'string' ? record.handoffNotes : '',
+    createdByUserId: typeof record.createdByUserId === 'string' ? record.createdByUserId : undefined,
+    createdByName: typeof record.createdByName === 'string' ? record.createdByName : undefined,
+    updatedByUserId: typeof record.updatedByUserId === 'string' ? record.updatedByUserId : undefined,
+    updatedByName: typeof record.updatedByName === 'string' ? record.updatedByName : undefined,
+    deletedByUserId: typeof record.deletedByUserId === 'string' ? record.deletedByUserId : undefined,
+    deletedByName: typeof record.deletedByName === 'string' ? record.deletedByName : undefined,
+    deviceId: typeof record.deviceId === 'string' ? record.deviceId : undefined,
+    auditTrail: normalizeAuditTrail(record.auditTrail),
   } as MineRecord
 
   if (baseRecord.type === 'barrenacion') {
@@ -5363,6 +5997,93 @@ function normalizeEvidencePhotos(value: unknown): EvidencePhoto[] {
       caption: item.caption ?? '',
       createdAt: item.createdAt ?? nowIso(),
     }))
+}
+
+function normalizeAuditTrail(value: unknown): AuditEvent[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => item as Partial<AuditEvent>)
+    .filter((item) => item.action && item.at)
+    .map((item) => ({
+      id: item.id || crypto.randomUUID(),
+      action: isAuditAction(item.action) ? item.action : 'updated',
+      at: item.at ?? nowIso(),
+      userId: item.userId ?? '',
+      username: item.username ?? '',
+      displayName: item.displayName ?? '',
+      role: isUserRole(item.role) ? item.role : 'supervisor',
+      deviceId: item.deviceId ?? '',
+      note: item.note ?? '',
+    }))
+}
+
+function normalizeUser(user: Partial<AppUser>): AppUser {
+  const createdAt = user.createdAt ?? nowIso()
+  return {
+    id: user.id || crypto.randomUUID(),
+    username: String(user.username || '').trim().toLowerCase(),
+    displayName: String(user.displayName || user.username || 'Usuario').trim(),
+    supervisorName: String(user.supervisorName || user.displayName || user.username || 'Supervisor').trim(),
+    role: isUserRole(user.role) ? user.role : 'supervisor',
+    pinHash: typeof user.pinHash === 'string' ? user.pinHash : undefined,
+    passwordHash: typeof user.passwordHash === 'string' ? user.passwordHash : undefined,
+    biometricEnabled: Boolean(user.biometricEnabled),
+    active: user.active !== false,
+    createdAt,
+    updatedAt: user.updatedAt ?? createdAt,
+    syncedAt: typeof user.syncedAt === 'string' ? user.syncedAt : undefined,
+    deletedAt: typeof user.deletedAt === 'string' ? user.deletedAt : undefined,
+  }
+}
+
+function mergeUsers(users: AppUser[]) {
+  const map = new Map<string, AppUser>()
+  users.map(normalizeUser).forEach((user) => {
+    if (!user.username) return
+    const current = map.get(user.id)
+    if (!current || new Date(user.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) {
+      map.set(user.id, user)
+    }
+  })
+  return Array.from(map.values()).sort((a, b) => a.displayName.localeCompare(b.displayName))
+}
+
+function stampRecord(record: MineRecord, action: AuditAction, user: AppUser, deviceId: string): MineRecord {
+  const at = nowIso()
+  const event: AuditEvent = {
+    id: crypto.randomUUID(),
+    action,
+    at,
+    userId: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    deviceId,
+  }
+  const next = normalizeRecord({
+    ...record,
+    role: user.role,
+    updatedAt: at,
+    updatedByUserId: user.id,
+    updatedByName: user.displayName,
+    deviceId,
+    auditTrail: [...(record.auditTrail ?? []), event],
+  } as MineRecord)
+  if (action === 'created') {
+    return normalizeRecord({
+      ...next,
+      createdByUserId: user.id,
+      createdByName: user.displayName,
+    } as MineRecord)
+  }
+  if (action === 'deleted') {
+    return normalizeRecord({
+      ...next,
+      deletedByUserId: user.id,
+      deletedByName: user.displayName,
+    } as MineRecord)
+  }
+  return next
 }
 
 function isLocationSnapshot(value: unknown): value is LocationSnapshot {
@@ -5535,6 +6256,7 @@ function buildEquipmentTimeline(records: MineRecord[]): EquipmentTimelineItem[] 
     const cleanEquipo = equipo.trim()
     if (!cleanEquipo) return
     items.push({
+      key: `${record.id}-${tipo}-${items.length}`,
       equipo: cleanEquipo,
       tipo,
       fecha: record.fecha,
@@ -5969,6 +6691,48 @@ function roleLabel(role: UserRole) {
   }[role]
 }
 
+async function hashSecret(value: string) {
+  const bytes = new TextEncoder().encode(value)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function getAuthErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '')
+  if (/cancel|canceled|cancelada/i.test(message)) return 'Autenticacion cancelada.'
+  if (/biometric|huella|available|disponible/i.test(message)) return message
+  return message || 'No se pudo autenticar.'
+}
+
+function canCapture(user: AppUser | null) {
+  return Boolean(user && user.active && !user.deletedAt && user.role !== 'gerencia')
+}
+
+function canManageUsers(user: AppUser | null) {
+  return Boolean(user && user.role === 'administrador')
+}
+
+function canManageCatalog(user: AppUser | null) {
+  return Boolean(user && user.role === 'administrador')
+}
+
+function canViewRecord(user: AppUser | null, record: MineRecord) {
+  if (!user) return false
+  if (user.role === 'administrador' || user.role === 'gerencia') return true
+  return record.createdByUserId === user.id || record.supervisor === user.supervisorName || !record.createdByUserId
+}
+
+function canEditRecord(user: AppUser | null, record: MineRecord) {
+  if (!user || user.role === 'gerencia') return false
+  if (user.role === 'administrador') return true
+  const ownsRecord = record.createdByUserId === user.id || record.supervisor === user.supervisorName || !record.createdByUserId
+  return ownsRecord && record.updatedAt !== record.syncedAt
+}
+
+function canDeleteRecord(user: AppUser | null, record: MineRecord) {
+  return canEditRecord(user, record)
+}
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString('es-MX', {
     dateStyle: 'short',
@@ -6387,6 +7151,10 @@ function isRetroActivity(value: unknown): value is RetroActivity {
 
 function isUserRole(value: unknown): value is UserRole {
   return value === 'supervisor' || value === 'administrador' || value === 'gerencia'
+}
+
+function isAuditAction(value: unknown): value is AuditAction {
+  return value === 'created' || value === 'updated' || value === 'deleted' || value === 'closed' || value === 'synced'
 }
 
 function getActiveKey<T, K extends keyof T>(

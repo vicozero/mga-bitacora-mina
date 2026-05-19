@@ -13,6 +13,8 @@ const dataFile =
   process.env.DATA_FILE || path.join(__dirname, '..', 'data', 'records.json')
 const messagesFile =
   process.env.MESSAGES_FILE || path.join(path.dirname(dataFile), 'messages.json')
+const usersFile =
+  process.env.USERS_FILE || path.join(path.dirname(dataFile), 'users.json')
 const distDir = path.join(__dirname, '..', 'dist')
 const defaultPublicUrl = 'https://mga-bitacora-mina.onrender.com'
 
@@ -49,6 +51,17 @@ app.post('/api/messages/sync', async (req, res) => {
   await writeMessages(messages)
   void notifySlackMessages(slackEvents)
   res.json({ messages })
+})
+
+app.get('/api/users', async (_req, res) => {
+  res.json({ users: await readUsers() })
+})
+
+app.post('/api/users/sync', async (req, res) => {
+  const incoming = Array.isArray(req.body?.users) ? req.body.users : []
+  const users = mergeUsers([...(await readUsers()), ...incoming])
+  await writeUsers(users)
+  res.json({ users })
 })
 
 app.put('/api/records/:id', async (req, res) => {
@@ -114,6 +127,21 @@ async function readMessages() {
 async function writeMessages(messages) {
   await fs.mkdir(path.dirname(messagesFile), { recursive: true })
   await fs.writeFile(messagesFile, JSON.stringify(mergeMessages(messages), null, 2))
+}
+
+async function readUsers() {
+  try {
+    const content = await fs.readFile(usersFile, 'utf8')
+    return mergeUsers(JSON.parse(content))
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error(error)
+    return []
+  }
+}
+
+async function writeUsers(users) {
+  await fs.mkdir(path.dirname(usersFile), { recursive: true })
+  await fs.writeFile(usersFile, JSON.stringify(mergeUsers(users), null, 2))
 }
 
 function normalizeRecord(record) {
@@ -278,6 +306,37 @@ function formatSlackEvent({ action, record }) {
     record.handoffNotes ? `Pase: ${shortText(record.handoffNotes, 90)}` : '',
   ].filter(Boolean)
   return `- ${actionLabel}: ${typeLabel} | ${details.join(' | ')}`
+}
+
+function normalizeUser(user) {
+  const now = new Date().toISOString()
+  const createdAt = user.createdAt || now
+  return {
+    id: user.id || randomUUID(),
+    username: String(user.username || '').trim().toLowerCase(),
+    displayName: String(user.displayName || user.username || 'Usuario').trim(),
+    supervisorName: String(user.supervisorName || user.displayName || user.username || 'Supervisor').trim(),
+    role: ['supervisor', 'administrador', 'gerencia'].includes(user.role) ? user.role : 'supervisor',
+    pinHash: typeof user.pinHash === 'string' ? user.pinHash : undefined,
+    passwordHash: typeof user.passwordHash === 'string' ? user.passwordHash : undefined,
+    biometricEnabled: Boolean(user.biometricEnabled),
+    active: user.active !== false,
+    createdAt,
+    updatedAt: user.updatedAt || createdAt,
+    syncedAt: user.syncedAt,
+    deletedAt: user.deletedAt,
+  }
+}
+
+function mergeUsers(users) {
+  const map = new Map()
+  users.map(normalizeUser).filter((user) => user.username).forEach((user) => {
+    const current = map.get(user.id)
+    if (!current || new Date(user.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) {
+      map.set(user.id, user)
+    }
+  })
+  return Array.from(map.values()).sort((a, b) => a.displayName.localeCompare(b.displayName))
 }
 
 function getRecordSummary(record) {
