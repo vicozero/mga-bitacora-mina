@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, ReactNode } from 'react'
 import {
+  Accessibility,
   Activity,
   BarChart3,
   Bell,
@@ -204,6 +205,11 @@ type CaptureReview = {
   errors: string[]
   kpis: ReturnType<typeof computeKpis>
 }
+type EquipmentFavorites = {
+  jumbo: string[]
+  scoop: string[]
+  retro: string[]
+}
 
 type ChatMessage = {
   id: string
@@ -220,6 +226,7 @@ const CAPTURE_DRAFT_KEY = 'mga-bitacora-capture-draft-v1'
 const MESSAGE_STORAGE_KEY = 'mga-bitacora-messages-v1'
 const API_URL_KEY = 'mga-bitacora-api-url'
 const WHATSAPP_NUMBER_KEY = 'mga-bitacora-whatsapp-number'
+const OPERATOR_MODE_KEY = 'mga-bitacora-operator-mode'
 const DEFAULT_API_URL = 'https://mga-bitacora-mina.onrender.com'
 const BARRENACION_TEMPLATE = '/templates/barrenacion-voladuras.pdf'
 const REZAGADO_TEMPLATE = '/templates/rezagado.pdf'
@@ -404,6 +411,7 @@ function App() {
   const [syncing, setSyncing] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [apiUrl, setApiUrl] = useState(loadApiUrl)
+  const [operatorMode, setOperatorMode] = useState(loadOperatorMode)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
@@ -442,6 +450,7 @@ function App() {
   )
   const pendingTotal = pendingSync + pendingMessages
   const latestMessages = useMemo(() => chatMessages.slice(0, 8), [chatMessages])
+  const equipmentFavorites = useMemo(() => buildEquipmentFavorites(visibleRecords), [visibleRecords])
   const captureReview = useMemo(
     () => buildCaptureReview(captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId),
     [captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId],
@@ -454,6 +463,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(WHATSAPP_NUMBER_KEY, whatsNumber)
   }, [whatsNumber])
+
+  useEffect(() => {
+    localStorage.setItem(OPERATOR_MODE_KEY, operatorMode ? '1' : '0')
+  }, [operatorMode])
 
   useEffect(() => {
     const draft: CaptureDraft = {
@@ -833,8 +846,13 @@ function App() {
     )
   }
 
+  function toggleOperatorMode() {
+    setOperatorMode((current) => !current)
+    setMessage(operatorMode ? 'Modo operador desactivado.' : 'Modo operador activado: controles mas grandes para captura en campo.')
+  }
+
   return (
-    <main className={`app-shell ${section === 'captura' ? 'capture-mode' : section === 'dashboard' || section === 'historial' ? 'review-mode' : 'home-mode'}`}>
+    <main className={`app-shell ${operatorMode ? 'operator-mode' : ''} ${section === 'captura' ? 'capture-mode' : section === 'dashboard' || section === 'historial' ? 'review-mode' : 'home-mode'}`}>
       <header className="topbar">
         <button
           className="chrome-icon"
@@ -878,6 +896,15 @@ function App() {
           <RefreshCw size={18} className={syncing ? 'spin' : ''} />
           {syncing ? 'Conectando' : pendingTotal > 0 ? 'Pendiente' : 'Al dia'}
           {pendingTotal > 0 && <span>{pendingTotal}</span>}
+        </button>
+        <button
+          className={`operator-toggle ${operatorMode ? 'active' : ''}`}
+          type="button"
+          aria-pressed={operatorMode}
+          onClick={toggleOperatorMode}
+        >
+          <Accessibility size={18} />
+          <span>Operador</span>
         </button>
         <button
           className="chrome-icon"
@@ -936,6 +963,11 @@ function App() {
             <span>Nueva captura</span>
             <small>Limpia el formulario actual</small>
           </button>
+          <button className={operatorMode ? 'active' : ''} type="button" onClick={toggleOperatorMode}>
+            <Accessibility size={20} />
+            <span>Modo operador</span>
+            <small>{operatorMode ? 'Controles grandes activos' : 'Botones y texto mas grandes'}</small>
+          </button>
           <button type="button" onClick={() => {
             setChatPanelOpen(true)
             closeMenus()
@@ -965,6 +997,9 @@ function App() {
           </button>
           <button type="button" onClick={startTurnoCompleto}>
             <Mountain size={18} /> Turno completo
+          </button>
+          <button type="button" onClick={toggleOperatorMode}>
+            <Accessibility size={18} /> {operatorMode ? 'Modo normal' : 'Modo operador'}
           </button>
           <button type="button" onClick={goToHistory}>
             <History size={18} /> Historial local
@@ -1009,7 +1044,7 @@ function App() {
         </div>
       )}
 
-      {message && <div className="toast">{message}</div>}
+      {message && <div className="toast" role="status" aria-live="polite">{message}</div>}
       {editingId && section !== 'captura' && (
         <div className="edit-banner">
           <span>Hay una captura en edicion.</span>
@@ -1155,6 +1190,7 @@ function App() {
                 barrenacion={barrenacion}
                 base={turnoBase}
                 captureLayout={captureLayout}
+                equipmentFavorites={equipmentFavorites}
                 modules={turnoModules}
                 rezagado={rezagado}
                 seguridad={seguridad}
@@ -1408,6 +1444,11 @@ function SaveReviewModal({
   onConfirm: () => void
 }) {
   const canSave = review.errors.length === 0
+  const reviewStatus = review.errors.length > 0
+    ? `${review.errors.length} error(es) por corregir`
+    : review.warnings.length > 0
+    ? `${review.warnings.length} aviso(s) para revisar`
+    : 'Listo para guardar'
   return (
     <>
       <button className="review-modal-backdrop" type="button" aria-label="Cerrar revision" onClick={onCancel} />
@@ -1416,6 +1457,11 @@ function SaveReviewModal({
           <span>Revision antes de guardar</span>
           <h2>{review.title}</h2>
           <p>Confirma los registros que se guardaran en el historial local.</p>
+        </div>
+
+        <div className={`review-status ${review.errors.length > 0 ? 'error' : review.warnings.length > 0 ? 'warning' : 'ready'}`}>
+          <strong>{reviewStatus}</strong>
+          <span>{canSave ? 'Puedes guardar localmente y sincronizar despues.' : 'Corrige los datos marcados antes de guardar.'}</span>
         </div>
 
         <div className="review-kpi-grid">
@@ -1834,6 +1880,7 @@ function TurnoCompletoForm({
   barrenacion,
   base,
   captureLayout,
+  equipmentFavorites,
   modules,
   rezagado,
   seguridad,
@@ -1847,6 +1894,7 @@ function TurnoCompletoForm({
   barrenacion: BarrenacionRecord
   base: ShiftBase
   captureLayout: CaptureLayout
+  equipmentFavorites: EquipmentFavorites
   modules: TurnoModules
   rezagado: RezagadoRecord
   seguridad: SeguridadRecord
@@ -1929,8 +1977,8 @@ function TurnoCompletoForm({
             <AssistantMetric label="Retro" value={rezagado.retro.length} />
           </div>
           <section className="turno-module-section assistant-active-module">
-            {activeAssistantModule === 'barrenacion' && <BarrenacionAssistantForm record={barrenacion} setRecord={setBarrenacion} />}
-            {activeAssistantModule === 'rezagado' && <RezagadoAssistantForm record={rezagado} setRecord={setRezagado} />}
+            {activeAssistantModule === 'barrenacion' && <BarrenacionAssistantForm equipmentFavorites={equipmentFavorites} record={barrenacion} setRecord={setBarrenacion} />}
+            {activeAssistantModule === 'rezagado' && <RezagadoAssistantForm equipmentFavorites={equipmentFavorites} record={rezagado} setRecord={setRezagado} />}
             {activeAssistantModule === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} showBaseFields={false} />}
           </section>
         </QuickSection>
@@ -1967,9 +2015,11 @@ function AssistantMetric({ label, value }: { label: string; value: number }) {
 }
 
 function BarrenacionAssistantForm({
+  equipmentFavorites,
   record,
   setRecord,
 }: {
+  equipmentFavorites: EquipmentFavorites
   record: BarrenacionRecord
   setRecord: (record: BarrenacionRecord) => void
 }) {
@@ -1992,6 +2042,11 @@ function BarrenacionAssistantForm({
   const safeIndex = Math.min(rowIndex, Math.max(rowCount - 1, 0))
   const drillRow = drillRows[safeIndex] ?? emptyDrillRow(defaultJumbo)
   const blastRow = blastRows[safeIndex] ?? emptyBlastRow()
+  const drillEquipmentOptions = prioritizeOptions(
+    jumboEquipoOptions,
+    drillRow.equipo,
+    [...equipmentFavorites.jumbo, ...drillRows.map((row) => row.equipo)],
+  )
 
   function selectActivity(next: BarrenacionActivity) {
     setRowIndex(0)
@@ -2036,6 +2091,20 @@ function BarrenacionAssistantForm({
     setRowIndex(drillRows.length)
   }
 
+  function duplicateCurrentRow() {
+    if (isBlast) {
+      const clone = { ...blastRow }
+      const nextRows = [...blastRows.slice(0, safeIndex + 1), clone, ...blastRows.slice(safeIndex + 1)]
+      setRecord({ ...record, activeActivity: 'voladura', voladuras: nextRows })
+      setRowIndex(safeIndex + 1)
+      return
+    }
+    const clone = { ...drillRow }
+    const nextRows = [...drillRows.slice(0, safeIndex + 1), clone, ...drillRows.slice(safeIndex + 1)]
+    setDrillRows(nextRows)
+    setRowIndex(safeIndex + 1)
+  }
+
   function removeCurrentRow() {
     if (isBlast) {
       const nextRows = blastRows.filter((_, index) => index !== safeIndex)
@@ -2073,6 +2142,7 @@ function BarrenacionAssistantForm({
               index={safeIndex}
               label={isBlast ? 'Voladura' : shortBarrenacionActivityLabel(activity)}
               onAdd={addCurrentRow}
+              onDuplicate={duplicateCurrentRow}
               onRemove={removeCurrentRow}
               onSelect={setRowIndex}
             />
@@ -2085,7 +2155,7 @@ function BarrenacionAssistantForm({
               </div>
             ) : (
               <div className="form-grid quick">
-                <Field label="Equipo" value={drillRow.equipo} options={jumboEquipoOptions} onChange={(value) => updateDrill({ equipo: value })} />
+                <Field label="Equipo" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill({ equipo: value })} />
                 <Field label="Operador" value={drillRow.operador} onChange={(value) => updateDrill({ operador: value })} />
                 <Field label="Ayudante" value={drillRow.ayudante} onChange={(value) => updateDrill({ ayudante: value })} />
                 <Field label="Nivel / obra" value={drillRow.nivelObra} onChange={(value) => updateDrill({ nivelObra: value })} />
@@ -2169,9 +2239,11 @@ function BarrenacionAssistantForm({
 }
 
 function RezagadoAssistantForm({
+  equipmentFavorites,
   record,
   setRecord,
 }: {
+  equipmentFavorites: EquipmentFavorites
   record: RezagadoRecord
   setRecord: (record: RezagadoRecord) => void
 }) {
@@ -2193,6 +2265,16 @@ function RezagadoAssistantForm({
   const retroRow = retroRows[safeIndex] ?? emptyRetroRow()
   const selectedScoopActivities = getSelectedHaulActivities(scoopRow)
   const selectedRetroActivities = getSelectedRetroActivities(retroRow)
+  const scoopOptions = prioritizeOptions(
+    scoopEquipoOptions,
+    scoopRow.equipo,
+    [...equipmentFavorites.scoop, ...scoopRows.map((row) => row.equipo)],
+  )
+  const retroOptions = prioritizeOptions(
+    retroEquipoOptions,
+    retroRow.equipo,
+    [...equipmentFavorites.retro, ...retroRows.map((row) => row.equipo)],
+  )
 
   function selectEquipment(next: RezagadoEquipment) {
     setRowIndex(0)
@@ -2243,6 +2325,20 @@ function RezagadoAssistantForm({
     setRowIndex(retroRows.length)
   }
 
+  function duplicateCurrentRow() {
+    if (isScoop) {
+      const clone = { ...scoopRow, selectedActivities: [...selectedScoopActivities] }
+      const nextRows = [...scoopRows.slice(0, safeIndex + 1), clone, ...scoopRows.slice(safeIndex + 1)]
+      setScoopRows(nextRows)
+      setRowIndex(safeIndex + 1)
+      return
+    }
+    const clone = { ...retroRow, selectedActivities: [...selectedRetroActivities] }
+    const nextRows = [...retroRows.slice(0, safeIndex + 1), clone, ...retroRows.slice(safeIndex + 1)]
+    setRetroRows(nextRows)
+    setRowIndex(safeIndex + 1)
+  }
+
   function removeCurrentRow() {
     if (isScoop) {
       const nextRows = scoopRows.filter((_, index) => index !== safeIndex)
@@ -2273,19 +2369,20 @@ function RezagadoAssistantForm({
               index={safeIndex}
               label={isScoop ? 'Scoop' : 'Retro'}
               onAdd={addCurrentRow}
+              onDuplicate={duplicateCurrentRow}
               onRemove={removeCurrentRow}
               onSelect={setRowIndex}
             />
             {isScoop ? (
               <div className="form-grid quick">
-                <Field label="Equipo" value={scoopRow.equipo} options={scoopEquipoOptions} onChange={(value) => updateScoopRow({ equipo: value })} />
+                <Field label="Equipo" value={scoopRow.equipo} options={scoopOptions} onChange={(value) => updateScoopRow({ equipo: value })} />
                 <Field label="Operador" value={scoopRow.operador} onChange={(value) => updateScoopRow({ operador: value })} />
                 <Field label="Nivel / obra" value={scoopRow.nivelObra} onChange={(value) => updateScoopRow({ nivelObra: value })} />
                 <Field label="Destino" value={scoopRow.destino} onChange={(value) => updateScoopRow({ destino: value })} />
               </div>
             ) : (
               <div className="form-grid quick">
-                <Field label="Equipo" value={retroRow.equipo} options={retroEquipoOptions} onChange={(value) => updateRetroRow({ equipo: value })} />
+                <Field label="Equipo" value={retroRow.equipo} options={retroOptions} onChange={(value) => updateRetroRow({ equipo: value })} />
                 <Field label="Operador" value={retroRow.operador} onChange={(value) => updateRetroRow({ operador: value })} />
                 <Field label="Nivel / obra" value={retroRow.nivelObra} onChange={(value) => updateRetroRow({ nivelObra: value })} />
               </div>
@@ -2424,6 +2521,7 @@ function AssistantRowTools({
   index,
   label,
   onAdd,
+  onDuplicate,
   onRemove,
   onSelect,
 }: {
@@ -2432,6 +2530,7 @@ function AssistantRowTools({
   index: number
   label: string
   onAdd: () => void
+  onDuplicate: () => void
   onRemove: () => void
   onSelect: (index: number) => void
 }) {
@@ -2446,6 +2545,9 @@ function AssistantRowTools({
       </div>
       <button className="assistant-small-action" type="button" onClick={onAdd}>
         <Plus size={15} /> {addLabel}
+      </button>
+      <button className="assistant-small-action" type="button" onClick={onDuplicate}>
+        <Edit3 size={15} /> Duplicar
       </button>
       <button className="assistant-small-action danger" type="button" onClick={onRemove}>
         <Trash2 size={15} /> Eliminar
@@ -3492,6 +3594,10 @@ function loadWhatsAppNumber() {
   return localStorage.getItem(WHATSAPP_NUMBER_KEY) ?? ''
 }
 
+function loadOperatorMode() {
+  return localStorage.getItem(OPERATOR_MODE_KEY) === '1'
+}
+
 function normalizeWhatsAppNumber(value: string) {
   const digits = value.replace(/\D/g, '')
   if (digits.length === 10) return `52${digits}`
@@ -3590,6 +3696,55 @@ function mergeChatMessages(messages: ChatMessage[]) {
     }
   })
   return Array.from(map.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+}
+
+function buildEquipmentFavorites(records: MineRecord[]): EquipmentFavorites {
+  const counters = {
+    jumbo: new Map<string, number>(),
+    scoop: new Map<string, number>(),
+    retro: new Map<string, number>(),
+  }
+
+  function count(target: keyof EquipmentFavorites, equipo: string) {
+    const clean = equipo.trim()
+    if (!clean) return
+    counters[target].set(clean, (counters[target].get(clean) ?? 0) + 1)
+  }
+
+  records.forEach((record) => {
+    if (record.type === 'barrenacion') {
+      record.jumbo.forEach((row) => count('jumbo', row.equipo))
+      record.maquinaPierna.forEach((row) => count('jumbo', row.equipo))
+    }
+    if (record.type === 'rezagado') {
+      record.scoopTram.forEach((row) => count('scoop', row.equipo))
+      record.retro.forEach((row) => count('retro', row.equipo))
+    }
+  })
+
+  const sorted = (map: Map<string, number>) =>
+    Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 8)
+      .map(([value]) => value)
+
+  return {
+    jumbo: sorted(counters.jumbo),
+    scoop: sorted(counters.scoop),
+    retro: sorted(counters.retro),
+  }
+}
+
+function prioritizeOptions(options: string[], selected: string, favorites: string[]) {
+  const seen = new Set<string>()
+  const next: string[] = []
+  ;[selected, ...favorites, ...options].forEach((item) => {
+    const value = item.trim()
+    if (!value || seen.has(value)) return
+    seen.add(value)
+    next.push(value)
+  })
+  return next
 }
 
 function sum<T>(rows: T[], key: keyof T) {

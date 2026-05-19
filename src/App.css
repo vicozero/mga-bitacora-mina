@@ -318,6 +318,34 @@ button:hover,
   color: #fff;
 }
 
+.operator-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  background: #fff;
+  border-color: #cbd8df;
+  color: #243442;
+}
+
+.operator-toggle.active {
+  background: #f0b429;
+  border-color: #f0b429;
+  color: #17212b;
+}
+
+.capture-mode .operator-toggle {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.24);
+  color: #fff;
+}
+
+.capture-mode .operator-toggle.active {
+  background: #fff;
+  border-color: #fff;
+  color: #9f2d31;
+}
+
 .sync-button span {
   display: inline-flex;
   align-items: center;
@@ -1032,7 +1060,7 @@ button:hover,
 
 .assistant-row-tools {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 8px;
   align-items: center;
   padding: 8px;
@@ -1107,6 +1135,56 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.52;
   transform: none;
+}
+
+.operator-mode button,
+.operator-mode .file-button,
+.operator-mode input,
+.operator-mode select,
+.operator-mode textarea {
+  min-height: 48px;
+  font-size: 16px;
+}
+
+.operator-mode label {
+  font-size: 15px;
+}
+
+.operator-mode .choice-button {
+  min-height: 96px;
+  padding: 16px;
+}
+
+.operator-mode .choice-button strong,
+.operator-mode .assistant-stepper button strong {
+  font-size: 16px;
+}
+
+.operator-mode .assistant-stepper button {
+  min-height: 64px;
+}
+
+.operator-mode .assistant-stepper button span {
+  width: 34px;
+  height: 34px;
+}
+
+.operator-mode .assistant-focus-title h2 {
+  font-size: 25px;
+}
+
+.operator-mode .assistant-focus-card,
+.operator-mode .quick-section {
+  gap: 18px;
+  padding: 20px;
+}
+
+.operator-mode .form-grid {
+  gap: 16px;
+}
+
+.operator-mode .assistant-footer-actions button {
+  min-height: 54px;
 }
 
 .turno-summary-strip {
@@ -1363,6 +1441,45 @@ button:disabled {
 .review-record-list small {
   color: #637180;
   font-weight: 700;
+}
+
+.review-status {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #bddfd7;
+  border-radius: 8px;
+  background: #edf9f5;
+}
+
+.review-status strong {
+  color: #0d5647;
+  font-size: 17px;
+}
+
+.review-status span {
+  color: #315c52;
+  font-weight: 800;
+}
+
+.review-status.warning {
+  border-color: #f1d48f;
+  background: #fff9e8;
+}
+
+.review-status.warning strong,
+.review-status.warning span {
+  color: #6e4b00;
+}
+
+.review-status.error {
+  border-color: #efb7b7;
+  background: #fff0f0;
+}
+
+.review-status.error strong,
+.review-status.error span {
+  color: #a12626;
 }
 
 .review-alerts {
@@ -2144,7 +2261,7 @@ th {
 
   .topbar {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     align-items: center;
     gap: 8px;
     padding: 10px 12px 12px;
@@ -2169,7 +2286,7 @@ th {
   }
 
   .chrome-icon:last-child {
-    grid-column: 4;
+    grid-column: 5;
     grid-row: 1;
   }
 
@@ -2219,6 +2336,34 @@ th {
     min-width: 16px;
     height: 16px;
     font-size: 10px;
+  }
+
+  .operator-toggle {
+    grid-column: 4;
+    grid-row: 1;
+    width: 42px;
+    min-width: 42px;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.22);
+    color: #fff;
+  }
+
+  .operator-toggle span {
+    display: none;
+  }
+
+  .review-mode .operator-toggle {
+    background: #fff;
+    border-color: #ccd7df;
+    color: #21313f;
+  }
+
+  .operator-toggle.active,
+  .review-mode .operator-toggle.active {
+    background: #f0b429;
+    border-color: #f0b429;
+    color: #17212b;
   }
 
   .workspace,
