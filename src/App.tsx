@@ -182,6 +182,24 @@ type SeguridadRecord = BaseRecord & {
 type MineRecord = BarrenacionRecord | RezagadoRecord | SeguridadRecord
 type ShiftBase = Pick<BaseRecord, 'supervisor' | 'fecha' | 'turno' | 'unidad'>
 type TurnoModules = Record<RecordType, boolean>
+type CaptureDraft = {
+  captureMode: CaptureMode
+  formType: RecordType
+  turnoBase: ShiftBase
+  turnoModules: TurnoModules
+  barrenacion: BarrenacionRecord
+  rezagado: RezagadoRecord
+  seguridad: SeguridadRecord
+  editingId: string | null
+  savedAt: string
+}
+type CaptureReview = {
+  title: string
+  records: MineRecord[]
+  warnings: string[]
+  errors: string[]
+  kpis: ReturnType<typeof computeKpis>
+}
 
 type ChatMessage = {
   id: string
@@ -194,6 +212,7 @@ type ChatMessage = {
 }
 
 const STORAGE_KEY = 'mga-bitacora-operaciones-v1'
+const CAPTURE_DRAFT_KEY = 'mga-bitacora-capture-draft-v1'
 const MESSAGE_STORAGE_KEY = 'mga-bitacora-messages-v1'
 const API_URL_KEY = 'mga-bitacora-api-url'
 const WHATSAPP_NUMBER_KEY = 'mga-bitacora-whatsapp-number'
@@ -359,14 +378,15 @@ const makeSeguridad = (): SeguridadRecord => {
 }
 
 function App() {
+  const initialDraft = useMemo(loadCaptureDraft, [])
   const [section, setSection] = useState<AppSection>(getInitialSection)
-  const [captureMode, setCaptureMode] = useState<CaptureMode>('modulo')
-  const [formType, setFormType] = useState<RecordType>('barrenacion')
-  const [turnoBase, setTurnoBase] = useState<ShiftBase>({ ...baseDefaults })
-  const [turnoModules, setTurnoModules] = useState<TurnoModules>({ ...defaultTurnoModules })
-  const [barrenacion, setBarrenacion] = useState<BarrenacionRecord>(makeBarrenacion)
-  const [rezagado, setRezagado] = useState<RezagadoRecord>(makeRezagado)
-  const [seguridad, setSeguridad] = useState<SeguridadRecord>(makeSeguridad)
+  const [captureMode, setCaptureMode] = useState<CaptureMode>(initialDraft?.captureMode ?? 'modulo')
+  const [formType, setFormType] = useState<RecordType>(initialDraft?.formType ?? 'barrenacion')
+  const [turnoBase, setTurnoBase] = useState<ShiftBase>(initialDraft?.turnoBase ?? { ...baseDefaults })
+  const [turnoModules, setTurnoModules] = useState<TurnoModules>(initialDraft?.turnoModules ?? { ...defaultTurnoModules })
+  const [barrenacion, setBarrenacion] = useState<BarrenacionRecord>(() => initialDraft?.barrenacion ?? makeBarrenacion())
+  const [rezagado, setRezagado] = useState<RezagadoRecord>(() => initialDraft?.rezagado ?? makeRezagado())
+  const [seguridad, setSeguridad] = useState<SeguridadRecord>(() => initialDraft?.seguridad ?? makeSeguridad())
   const [records, setRecords] = useState<MineRecord[]>(loadRecords)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(loadChatMessages)
   const [chatType, setChatType] = useState<ChatMessageType>('aviso')
@@ -374,9 +394,10 @@ function App() {
   const [chatText, setChatText] = useState('')
   const [whatsNumber, setWhatsNumber] = useState(loadWhatsAppNumber)
   const [query, setQuery] = useState('')
-  const [message, setMessage] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [message, setMessage] = useState(() => initialDraft ? `Borrador recuperado: ${formatDateTime(initialDraft.savedAt)}.` : '')
+  const [editingId, setEditingId] = useState<string | null>(initialDraft?.editingId ?? null)
   const [syncing, setSyncing] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
   const [apiUrl, setApiUrl] = useState(loadApiUrl)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
@@ -416,6 +437,10 @@ function App() {
   )
   const pendingTotal = pendingSync + pendingMessages
   const latestMessages = useMemo(() => chatMessages.slice(0, 8), [chatMessages])
+  const captureReview = useMemo(
+    () => buildCaptureReview(captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId),
+    [captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId],
+  )
 
   useEffect(() => {
     localStorage.setItem(API_URL_KEY, apiUrl)
@@ -426,11 +451,31 @@ function App() {
   }, [whatsNumber])
 
   useEffect(() => {
+    const draft: CaptureDraft = {
+      captureMode,
+      formType,
+      turnoBase,
+      turnoModules,
+      barrenacion,
+      rezagado,
+      seguridad,
+      editingId,
+      savedAt: nowIso(),
+    }
+    if (hasCaptureDraftContent(draft)) {
+      localStorage.setItem(CAPTURE_DRAFT_KEY, JSON.stringify(draft))
+      return
+    }
+    localStorage.removeItem(CAPTURE_DRAFT_KEY)
+  }, [captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId])
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setDrawerOpen(false)
         setActionsOpen(false)
         setChatPanelOpen(false)
+        setReviewOpen(false)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -529,10 +574,20 @@ function App() {
 
   function saveRecord(event: FormEvent) {
     event.preventDefault()
+    setReviewOpen(true)
+  }
+
+  function commitReviewedSave() {
+    if (captureReview.errors.length > 0) return
+    setReviewOpen(false)
     if (captureMode === 'turno' && !editingId) {
       saveTurnoCompleto()
       return
     }
+    saveModuloRecord()
+  }
+
+  function saveModuloRecord() {
     const source =
       formType === 'barrenacion' ? barrenacion : formType === 'rezagado' ? rezagado : seguridad
     const updated = normalizeRecord({
@@ -562,6 +617,7 @@ function App() {
     }
     persist([...selectedRecords, ...records])
     resetTurnoCompleto()
+    setCaptureMode('modulo')
     setSection('historial')
     setMessage(`Turno completo guardado en historial local con ${selectedRecords.length} registro(s).`)
   }
@@ -958,6 +1014,13 @@ function App() {
           </button>
         </div>
       )}
+      {reviewOpen && (
+        <SaveReviewModal
+          review={captureReview}
+          onCancel={() => setReviewOpen(false)}
+          onConfirm={commitReviewedSave}
+        />
+      )}
 
       {section === 'home' ? (
         <HomeScreen
@@ -1323,6 +1386,79 @@ function App() {
         )}
       </nav>
     </main>
+  )
+}
+
+function SaveReviewModal({
+  review,
+  onCancel,
+  onConfirm,
+}: {
+  review: CaptureReview
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const canSave = review.errors.length === 0
+  return (
+    <>
+      <button className="review-modal-backdrop" type="button" aria-label="Cerrar revision" onClick={onCancel} />
+      <section className="save-review-modal" role="dialog" aria-modal="true" aria-label="Revision antes de guardar">
+        <div className="save-review-head">
+          <span>Revision antes de guardar</span>
+          <h2>{review.title}</h2>
+          <p>Confirma los registros que se guardaran en el historial local.</p>
+        </div>
+
+        <div className="review-kpi-grid">
+          <article>
+            <span>Registros</span>
+            <strong>{review.records.length}</strong>
+          </article>
+          <article>
+            <span>Metros barrenados</span>
+            <strong>{review.kpis.metrosDados}</strong>
+          </article>
+          <article>
+            <span>Metros pegados</span>
+            <strong>{review.kpis.metrosPegados}</strong>
+          </article>
+          <article>
+            <span>Cucharones</span>
+            <strong>{review.kpis.rezagado}</strong>
+          </article>
+        </div>
+
+        <div className="review-record-list">
+          {review.records.map((record) => (
+            <article key={record.id}>
+              <span>{labelType(record.type)}</span>
+              <strong>{record.fecha} - Turno {record.turno}</strong>
+              <small>{record.supervisor || 'Supervisor pendiente'} - {record.unidad}</small>
+            </article>
+          ))}
+        </div>
+
+        {(review.errors.length > 0 || review.warnings.length > 0) && (
+          <div className="review-alerts">
+            {review.errors.map((item) => (
+              <p className="error" key={item}>{item}</p>
+            ))}
+            {review.warnings.map((item) => (
+              <p key={item}>{item}</p>
+            ))}
+          </div>
+        )}
+
+        <div className="save-review-actions">
+          <button type="button" onClick={onCancel}>
+            Seguir editando
+          </button>
+          <button className="primary-action" type="button" onClick={onConfirm} disabled={!canSave}>
+            <Save size={18} /> Guardar local
+          </button>
+        </div>
+      </section>
+    </>
   )
 }
 
@@ -2749,6 +2885,28 @@ function loadRecords(): MineRecord[] {
   }
 }
 
+function loadCaptureDraft(): CaptureDraft | null {
+  try {
+    const stored = localStorage.getItem(CAPTURE_DRAFT_KEY)
+    if (!stored) return null
+    const draft = JSON.parse(stored) as CaptureDraft
+    const normalized: CaptureDraft = {
+      captureMode: isCaptureMode(draft.captureMode) ? draft.captureMode : 'modulo',
+      formType: isRecordType(draft.formType) ? draft.formType : 'barrenacion',
+      turnoBase: normalizeShiftBase(draft.turnoBase),
+      turnoModules: normalizeTurnoModules(draft.turnoModules),
+      barrenacion: normalizeRecord(draft.barrenacion ?? makeBarrenacion()) as BarrenacionRecord,
+      rezagado: normalizeRecord(draft.rezagado ?? makeRezagado()) as RezagadoRecord,
+      seguridad: normalizeRecord(draft.seguridad ?? makeSeguridad()) as SeguridadRecord,
+      editingId: draft.editingId ?? null,
+      savedAt: draft.savedAt ?? nowIso(),
+    }
+    return hasCaptureDraftContent(normalized) ? normalized : null
+  } catch {
+    return null
+  }
+}
+
 function loadChatMessages(): ChatMessage[] {
   try {
     return mergeChatMessages(
@@ -2788,6 +2946,23 @@ function normalizeWhatsAppNumber(value: string) {
 
 function resolveApiBase(apiUrl: string) {
   return (apiUrl.trim() || DEFAULT_API_URL).replace(/\/$/, '')
+}
+
+function normalizeShiftBase(base?: Partial<ShiftBase>): ShiftBase {
+  return {
+    supervisor: base?.supervisor ?? '',
+    fecha: base?.fecha ?? today,
+    turno: base?.turno === '2' ? '2' : '1',
+    unidad: base?.unidad ?? baseDefaults.unidad,
+  }
+}
+
+function normalizeTurnoModules(modules?: Partial<TurnoModules>): TurnoModules {
+  return {
+    barrenacion: modules?.barrenacion ?? defaultTurnoModules.barrenacion,
+    rezagado: modules?.rezagado ?? defaultTurnoModules.rezagado,
+    seguridad: modules?.seguridad ?? defaultTurnoModules.seguridad,
+  }
 }
 
 function applyShiftBase<T extends MineRecord>(record: T, base: ShiftBase, updatedAt: string): T {
@@ -2905,6 +3080,106 @@ function computeKpis(records: MineRecord[]) {
       fuerzaLaboral: 0,
     },
   )
+}
+
+function buildCaptureReview(
+  captureMode: CaptureMode,
+  formType: RecordType,
+  turnoBase: ShiftBase,
+  turnoModules: TurnoModules,
+  barrenacion: BarrenacionRecord,
+  rezagado: RezagadoRecord,
+  seguridad: SeguridadRecord,
+  editingId: string | null,
+): CaptureReview {
+  const records = getRecordsForReview(captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId)
+  const warnings: string[] = []
+  const errors: string[] = []
+  if (records.length === 0) errors.push('Selecciona al menos un modulo antes de guardar.')
+  records.forEach((record) => validateReviewRecord(record, warnings))
+  return {
+    title: captureMode === 'turno' && !editingId ? 'Turno completo' : editingId ? 'Guardar cambios' : 'Nueva captura',
+    records,
+    warnings,
+    errors,
+    kpis: computeKpis(records),
+  }
+}
+
+function getRecordsForReview(
+  captureMode: CaptureMode,
+  formType: RecordType,
+  turnoBase: ShiftBase,
+  turnoModules: TurnoModules,
+  barrenacion: BarrenacionRecord,
+  rezagado: RezagadoRecord,
+  seguridad: SeguridadRecord,
+  editingId: string | null,
+) {
+  const updatedAt = nowIso()
+  if (captureMode === 'turno' && !editingId) {
+    const selected: MineRecord[] = []
+    if (turnoModules.barrenacion) selected.push(applyShiftBase(barrenacion, turnoBase, updatedAt))
+    if (turnoModules.rezagado) selected.push(applyShiftBase(rezagado, turnoBase, updatedAt))
+    if (turnoModules.seguridad) selected.push(applyShiftBase(seguridad, turnoBase, updatedAt))
+    return selected
+  }
+  const source = formType === 'barrenacion' ? barrenacion : formType === 'rezagado' ? rezagado : seguridad
+  return [normalizeRecord({ ...source, updatedAt, deletedAt: undefined, syncedAt: undefined } as MineRecord)]
+}
+
+function validateReviewRecord(record: MineRecord, warnings: string[]) {
+  const label = labelType(record.type)
+  if (!record.supervisor.trim()) warnings.push(`${label}: falta supervisor.`)
+  if (!record.fecha) warnings.push(`${label}: falta fecha.`)
+  if (record.type === 'barrenacion') validateBarrenacionReview(record, warnings)
+  if (record.type === 'rezagado') validateRezagadoReview(record, warnings)
+  if (record.type === 'seguridad') validateSeguridadReview(record, warnings)
+}
+
+function validateBarrenacionReview(record: BarrenacionRecord, warnings: string[]) {
+  const drillRows = [...record.jumbo, ...record.maquinaPierna].filter(hasDrillData)
+  const blastRows = record.voladuras.filter(hasBlastData)
+  if (drillRows.length === 0 && blastRows.length === 0) {
+    warnings.push('Barrenacion: no hay equipos, frentes o voladuras con produccion capturada.')
+  }
+  drillRows.forEach((row, index) => {
+    if (!row.operador.trim()) warnings.push(`Barrenacion equipo ${index + 1}: falta operador.`)
+    if (!row.nivelObra.trim()) warnings.push(`Barrenacion equipo ${index + 1}: falta nivel/obra.`)
+    if (row.horometroDieselFinal > 0 && row.horometroDieselFinal < row.horometroDieselInicial) warnings.push(`Barrenacion equipo ${index + 1}: horometro diesel final menor al inicial.`)
+    if (row.horometroElectFinal > 0 && row.horometroElectFinal < row.horometroElectInicial) warnings.push(`Barrenacion equipo ${index + 1}: horometro electrico final menor al inicial.`)
+    if (!row.barrenosDados && !row.barrenosCargados && !row.metrosDados) warnings.push(`Barrenacion equipo ${index + 1}: produccion en cero.`)
+  })
+  blastRows.forEach((row, index) => {
+    if (!row.obra.trim()) warnings.push(`Voladura ${index + 1}: falta obra/frente.`)
+    if (!row.oficial.trim()) warnings.push(`Voladura ${index + 1}: falta oficial.`)
+    if (!row.barrenosPegados && !row.metrosPegados) warnings.push(`Voladura ${index + 1}: produccion en cero.`)
+  })
+}
+
+function validateRezagadoReview(record: RezagadoRecord, warnings: string[]) {
+  const scoopRows = record.scoopTram.filter(hasHaulData)
+  const retroRows = record.retro.filter(hasRetroData)
+  if (scoopRows.length === 0 && retroRows.length === 0) warnings.push('Rezagado: no hay equipos con produccion capturada.')
+  scoopRows.forEach((row, index) => {
+    if (!row.operador.trim()) warnings.push(`Scoop ${index + 1}: falta operador.`)
+    if (!row.nivelObra.trim()) warnings.push(`Scoop ${index + 1}: falta nivel/obra.`)
+    if (row.horometroFinal > 0 && row.horometroFinal < row.horometroInicial) warnings.push(`Scoop ${index + 1}: horometro final menor al inicial.`)
+    if (!row.rezagado && !row.traspaleo && !row.limpia && !row.balastreo && !row.planilla && !row.relleno) warnings.push(`Scoop ${index + 1}: trabajo en cero.`)
+  })
+  retroRows.forEach((row, index) => {
+    if (!row.operador.trim()) warnings.push(`Retro ${index + 1}: falta operador.`)
+    if (!row.nivelObra.trim()) warnings.push(`Retro ${index + 1}: falta nivel/obra.`)
+    if (row.horometroFinal > 0 && row.horometroFinal < row.horometroInicial) warnings.push(`Retro ${index + 1}: horometro final menor al inicial.`)
+    if (!row.amacice && !row.reAmacice && !row.tableo && !row.limpia && !row.balastreo && !row.mtAcequia) warnings.push(`Retro ${index + 1}: trabajo en cero.`)
+  })
+}
+
+function validateSeguridadReview(record: SeguridadRecord, warnings: string[]) {
+  const hasText = Boolean(record.actosInseguros || record.condicionesInseguras || record.platicaSeguridad || record.actividadesSeguridad || record.correccionesMejoras || record.actividadesOperacion || record.observaciones)
+  if (!record.accidentes && !record.incidentes && !record.fuerzaLaboral && !hasText) {
+    warnings.push('Seguridad: no hay resumen, hallazgo o fuerza laboral capturada.')
+  }
 }
 
 function labelType(type: RecordType) {
@@ -3218,6 +3493,74 @@ function getSelectedRetroActivities(row: RetroRow): RetroActivity[] {
   const withValues = retroActivityKeys.filter((key) => Number(row[key] || 0) > 0)
   const selected = Array.from(new Set<RetroActivity>([...stored, ...withValues]))
   return selected.length ? selected : ['amacice']
+}
+
+function hasCaptureDraftContent(draft: CaptureDraft) {
+  return Boolean(
+    draft.editingId
+      || hasShiftBaseData(draft.turnoBase)
+      || modulesChanged(draft.turnoModules)
+      || hasRecordDraftData(draft.barrenacion)
+      || hasRecordDraftData(draft.rezagado)
+      || hasRecordDraftData(draft.seguridad),
+  )
+}
+
+function hasShiftBaseData(base: ShiftBase) {
+  return Boolean(
+    base.supervisor.trim()
+      || base.fecha !== today
+      || base.turno !== baseDefaults.turno
+      || base.unidad.trim() !== baseDefaults.unidad,
+  )
+}
+
+function modulesChanged(modules: TurnoModules) {
+  return modules.barrenacion !== defaultTurnoModules.barrenacion
+    || modules.rezagado !== defaultTurnoModules.rezagado
+    || modules.seguridad !== defaultTurnoModules.seguridad
+}
+
+function hasRecordDraftData(record: MineRecord) {
+  if (hasShiftBaseData(record)) return true
+  if (record.type === 'barrenacion') {
+    return Boolean(
+      record.jumbo.some(hasDrillData)
+        || record.maquinaPierna.some(hasDrillData)
+        || record.voladuras.some(hasBlastData)
+        || record.polvorero
+        || record.choferCamion
+        || record.choferPipa
+        || record.bobCat
+        || record.bombeo
+        || record.servicios
+        || record.comentarios
+        || record.inasistencias,
+    )
+  }
+  if (record.type === 'rezagado') {
+    return Boolean(record.scoopTram.some(hasHaulData) || record.retro.some(hasRetroData) || record.comentarios)
+  }
+  return Boolean(
+    record.accidentes
+      || record.incidentes
+      || record.fuerzaLaboral
+      || record.actosInseguros
+      || record.condicionesInseguras
+      || record.platicaSeguridad
+      || record.actividadesSeguridad
+      || record.correccionesMejoras
+      || record.actividadesOperacion
+      || record.observaciones,
+  )
+}
+
+function isCaptureMode(value: unknown): value is CaptureMode {
+  return value === 'modulo' || value === 'turno'
+}
+
+function isRecordType(value: unknown): value is RecordType {
+  return value === 'barrenacion' || value === 'rezagado' || value === 'seguridad'
 }
 
 function isBarrenacionActivity(value: unknown): value is BarrenacionActivity {
