@@ -2346,13 +2346,20 @@ function LoginScreen({
   const [busy, setBusy] = useState(false)
   const selectedUser = users.find((user) => user.id === userId) ?? users[0]
 
-  async function submit(event: FormEvent) {
-    event.preventDefault()
+  async function runLogin(nextMethod = method) {
     if (!selectedUser) return
     setBusy(true)
-    const ok = await onLogin(selectedUser.id, method, secret)
-    setBusy(false)
-    if (!ok) setSecret('')
+    try {
+      const ok = await onLogin(selectedUser.id, nextMethod, nextMethod === 'biometric' ? undefined : secret)
+      if (!ok && nextMethod !== 'biometric') setSecret('')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    await runLogin()
   }
 
   return (
@@ -2377,13 +2384,21 @@ function LoginScreen({
             </select>
           </label>
           <div className="login-methods" aria-label="Metodo de acceso">
-            <button className={method === 'pin' ? 'active' : ''} type="button" onClick={() => setMethod('pin')}>
+            <button className={method === 'pin' ? 'active' : ''} type="button" onClick={() => setMethod('pin')} disabled={busy}>
               <KeyRound size={18} /> PIN
             </button>
-            <button className={method === 'password' ? 'active' : ''} type="button" onClick={() => setMethod('password')}>
+            <button className={method === 'password' ? 'active' : ''} type="button" onClick={() => setMethod('password')} disabled={busy}>
               <Lock size={18} /> Contrasena
             </button>
-            <button className={method === 'biometric' ? 'active' : ''} type="button" onClick={() => setMethod('biometric')} disabled={!selectedUser?.biometricEnabled}>
+            <button
+              className={method === 'biometric' ? 'active' : ''}
+              type="button"
+              onClick={() => {
+                setMethod('biometric')
+                void runLogin('biometric')
+              }}
+              disabled={busy || !selectedUser?.biometricEnabled}
+            >
               <Fingerprint size={18} /> Huella
             </button>
           </div>
@@ -2403,7 +2418,7 @@ function LoginScreen({
           )}
           <button className="primary-action" type="submit" disabled={busy || !selectedUser}>
             {method === 'biometric' ? <Fingerprint size={18} /> : <KeyRound size={18} />}
-            {busy ? 'Validando' : 'Entrar'}
+            {busy ? 'Validando' : method === 'biometric' ? 'Leer huella' : 'Entrar'}
           </button>
         </form>
         <div className="login-help">
@@ -6700,6 +6715,7 @@ async function hashSecret(value: string) {
 function getAuthErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || '')
   if (/cancel|canceled|cancelada/i.test(message)) return 'Autenticacion cancelada.'
+  if (/not implemented on web|plugin is not implemented/i.test(message)) return 'La huella solo funciona en la APK instalada.'
   if (/biometric|huella|available|disponible/i.test(message)) return message
   return message || 'No se pudo autenticar.'
 }
