@@ -534,6 +534,10 @@ button:hover,
   background: #11bfa0;
 }
 
+.module-slate {
+  background: #31404d;
+}
+
 .record-tabs .module-card.active {
   outline: 4px solid rgba(255, 255, 255, 0.45);
   outline-offset: -8px;
@@ -853,6 +857,51 @@ button:hover,
 .home-summary strong {
   color: #16242c;
   font-size: 24px;
+}
+
+.turno-completo {
+  display: grid;
+  gap: 16px;
+}
+
+.turno-module-section {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.turno-module-section .panel-title {
+  margin-bottom: 0;
+}
+
+.turno-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.turno-summary-strip article {
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.turno-summary-strip span {
+  color: #647180;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.turno-summary-strip strong {
+  color: #16242c;
+  font-size: 20px;
 }
 
 .history-screen {
@@ -1857,6 +1906,10 @@ th {
   }
 
   .home-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .turno-summary-strip {
     grid-template-columns: 1fr;
   }
 

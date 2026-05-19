@@ -43,6 +43,7 @@ import './App.css'
 
 type Shift = '1' | '2'
 type AppSection = 'home' | 'captura' | 'historial' | 'dashboard'
+type CaptureMode = 'modulo' | 'turno'
 type RecordType = 'barrenacion' | 'rezagado' | 'seguridad'
 type BarrenacionActivity = 'jumbo' | 'maquinaPierna' | 'voladura'
 type RezagadoEquipment = 'scoop' | 'retro'
@@ -179,6 +180,8 @@ type SeguridadRecord = BaseRecord & {
 }
 
 type MineRecord = BarrenacionRecord | RezagadoRecord | SeguridadRecord
+type ShiftBase = Pick<BaseRecord, 'supervisor' | 'fecha' | 'turno' | 'unidad'>
+type TurnoModules = Record<RecordType, boolean>
 
 type ChatMessage = {
   id: string
@@ -206,6 +209,12 @@ const baseDefaults = {
   fecha: today,
   turno: '1' as Shift,
   unidad: 'Unidad Providencia',
+}
+
+const defaultTurnoModules: TurnoModules = {
+  barrenacion: true,
+  rezagado: true,
+  seguridad: false,
 }
 
 const nowIso = () => new Date().toISOString()
@@ -351,7 +360,10 @@ const makeSeguridad = (): SeguridadRecord => {
 
 function App() {
   const [section, setSection] = useState<AppSection>(getInitialSection)
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('modulo')
   const [formType, setFormType] = useState<RecordType>('barrenacion')
+  const [turnoBase, setTurnoBase] = useState<ShiftBase>({ ...baseDefaults })
+  const [turnoModules, setTurnoModules] = useState<TurnoModules>({ ...defaultTurnoModules })
   const [barrenacion, setBarrenacion] = useState<BarrenacionRecord>(makeBarrenacion)
   const [rezagado, setRezagado] = useState<RezagadoRecord>(makeRezagado)
   const [seguridad, setSeguridad] = useState<SeguridadRecord>(makeSeguridad)
@@ -517,6 +529,10 @@ function App() {
 
   function saveRecord(event: FormEvent) {
     event.preventDefault()
+    if (captureMode === 'turno' && !editingId) {
+      saveTurnoCompleto()
+      return
+    }
     const source =
       formType === 'barrenacion' ? barrenacion : formType === 'rezagado' ? rezagado : seguridad
     const updated = normalizeRecord({
@@ -534,14 +550,39 @@ function App() {
     setMessage(editingId ? 'Captura actualizada en el historial local.' : 'Registro guardado en el historial local de este dispositivo.')
   }
 
+  function saveTurnoCompleto() {
+    const selectedRecords: MineRecord[] = []
+    const updatedAt = nowIso()
+    if (turnoModules.barrenacion) selectedRecords.push(applyShiftBase(barrenacion, turnoBase, updatedAt))
+    if (turnoModules.rezagado) selectedRecords.push(applyShiftBase(rezagado, turnoBase, updatedAt))
+    if (turnoModules.seguridad) selectedRecords.push(applyShiftBase(seguridad, turnoBase, updatedAt))
+    if (selectedRecords.length === 0) {
+      setMessage('Selecciona al menos un modulo del turno antes de guardar.')
+      return
+    }
+    persist([...selectedRecords, ...records])
+    resetTurnoCompleto()
+    setSection('historial')
+    setMessage(`Turno completo guardado en historial local con ${selectedRecords.length} registro(s).`)
+  }
+
   function resetForm(type: RecordType) {
     if (type === 'barrenacion') setBarrenacion(makeBarrenacion())
     if (type === 'rezagado') setRezagado(makeRezagado())
     if (type === 'seguridad') setSeguridad(makeSeguridad())
   }
 
+  function resetTurnoCompleto() {
+    setTurnoBase({ ...baseDefaults, fecha: new Date().toISOString().slice(0, 10) })
+    setTurnoModules({ ...defaultTurnoModules })
+    setBarrenacion(makeBarrenacion())
+    setRezagado(makeRezagado())
+    setSeguridad(makeSeguridad())
+  }
+
   function startEdit(record: MineRecord) {
     const cleanRecord = { ...record, deletedAt: undefined } as MineRecord
+    setCaptureMode('modulo')
     setFormType(record.type)
     if (record.type === 'barrenacion') setBarrenacion(cleanRecord as BarrenacionRecord)
     if (record.type === 'rezagado') setRezagado(cleanRecord as RezagadoRecord)
@@ -562,6 +603,7 @@ function App() {
       setMessage('Guarda o cancela la edicion antes de cambiar de formato.')
       return
     }
+    setCaptureMode('modulo')
     setFormType(type)
   }
 
@@ -576,6 +618,7 @@ function App() {
   }
 
   function goToCapture() {
+    setCaptureMode('modulo')
     setSection('captura')
     closeMenus()
   }
@@ -587,8 +630,21 @@ function App() {
 
   function openCapture(type: RecordType) {
     selectFormType(type)
+    setCaptureMode('modulo')
     setSection('captura')
     closeMenus()
+  }
+
+  function startTurnoCompleto() {
+    if (editingId) {
+      setMessage('Guarda o cancela la edicion antes de abrir turno completo.')
+      return
+    }
+    if (captureMode !== 'turno' || section !== 'captura') resetTurnoCompleto()
+    setCaptureMode('turno')
+    setSection('captura')
+    closeMenus()
+    setMessage('Turno completo listo. Captura los datos generales una sola vez.')
   }
 
   function goToDashboard() {
@@ -602,7 +658,8 @@ function App() {
   }
 
   function startNewCapture() {
-    resetForm(formType)
+    if (captureMode === 'turno') resetTurnoCompleto()
+    else resetForm(formType)
     setEditingId(null)
     setSection('captura')
     closeMenus()
@@ -794,6 +851,11 @@ function App() {
             <span>Captura de campo</span>
             <small>Registro rapido offline</small>
           </button>
+          <button className={captureMode === 'turno' && section === 'captura' ? 'active' : ''} type="button" onClick={startTurnoCompleto}>
+            <Mountain size={20} />
+            <span>Turno completo</span>
+            <small>Una bitacora con varios modulos</small>
+          </button>
           <button className={section === 'historial' ? 'active' : ''} type="button" onClick={goToHistory}>
             <History size={20} />
             <span>Historial local</span>
@@ -837,6 +899,9 @@ function App() {
           </button>
           <button type="button" onClick={startNewCapture}>
             <Edit3 size={18} /> Nueva captura
+          </button>
+          <button type="button" onClick={startTurnoCompleto}>
+            <Mountain size={18} /> Turno completo
           </button>
           <button type="button" onClick={goToHistory}>
             <History size={18} /> Historial local
@@ -907,6 +972,7 @@ function App() {
           onNewCapture={startNewCapture}
           onOpenCapture={openCapture}
           onSync={() => void syncAll()}
+          onTurnoCompleto={startTurnoCompleto}
         />
       ) : section === 'captura' ? (
         <form id="capture-form" className="workspace" onSubmit={saveRecord}>
@@ -914,9 +980,11 @@ function App() {
             <div className="capture-badge">
               <Mountain size={18} /> Operacion mina
             </div>
-            <h1>{editingId ? 'Editar captura' : 'Nueva captura'}</h1>
+            <h1>{captureMode === 'turno' ? 'Turno completo' : editingId ? 'Editar captura' : 'Nueva captura'}</h1>
             <p>
-              {isApk
+              {captureMode === 'turno'
+                ? 'Captura los datos generales una sola vez y agrega los modulos trabajados durante el turno.'
+                : isApk
                 ? 'Captura un evento de campo con los datos clave. Todo queda en el historial local y se envia a red solo al sincronizar.'
                 : 'Captura un evento de campo con los datos clave. El reporte completo se arma en la revision web.'}
             </p>
@@ -925,6 +993,16 @@ function App() {
               <strong>{syncing ? 'Sincronizando' : pendingSync > 0 ? `${pendingSync} por enviar` : 'Historial local al dia'}</strong>
             </div>
             <div className="record-tabs">
+              <button
+                type="button"
+                className={`module-card module-slate ${captureMode === 'turno' ? 'active' : ''}`}
+                onClick={startTurnoCompleto}
+              >
+                <span className="module-icon"><Mountain size={24} /></span>
+                <span className="module-title">Turno</span>
+                <span className="module-subtitle">Completo</span>
+                <span className="module-ring"><strong>{recordCounts.total}</strong><small>hist.</small></span>
+              </button>
               <button
                 type="button"
                 className={`module-card module-red ${formType === 'barrenacion' ? 'active' : ''}`}
@@ -1002,12 +1080,29 @@ function App() {
           </aside>
 
           <section className="form-panel">
-            <CaptureFlowNav formType={formType} />
-            {formType === 'barrenacion' && (
-              <BarrenacionForm record={barrenacion} setRecord={setBarrenacion} />
+            {captureMode === 'turno' && !editingId ? (
+              <TurnoCompletoForm
+                barrenacion={barrenacion}
+                base={turnoBase}
+                modules={turnoModules}
+                rezagado={rezagado}
+                seguridad={seguridad}
+                setBarrenacion={setBarrenacion}
+                setBase={setTurnoBase}
+                setModules={setTurnoModules}
+                setRezagado={setRezagado}
+                setSeguridad={setSeguridad}
+              />
+            ) : (
+              <>
+                <CaptureFlowNav formType={formType} />
+                {formType === 'barrenacion' && (
+                  <BarrenacionForm record={barrenacion} setRecord={setBarrenacion} />
+                )}
+                {formType === 'rezagado' && <RezagadoForm record={rezagado} setRecord={setRezagado} />}
+                {formType === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} />}
+              </>
             )}
-            {formType === 'rezagado' && <RezagadoForm record={rezagado} setRecord={setRezagado} />}
-            {formType === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} />}
           </section>
         </form>
       ) : section === 'historial' ? (
@@ -1243,6 +1338,7 @@ function HomeScreen({
   onNewCapture,
   onOpenCapture,
   onSync,
+  onTurnoCompleto,
 }: {
   pendingMessages: number
   pendingSync: number
@@ -1255,6 +1351,7 @@ function HomeScreen({
   onNewCapture: () => void
   onOpenCapture: (type: RecordType) => void
   onSync: () => void
+  onTurnoCompleto: () => void
 }) {
   return (
     <section className="home-screen">
@@ -1268,6 +1365,11 @@ function HomeScreen({
       </div>
 
       <div className="module-launch-grid" aria-label="Modulos principales">
+        <button className="launch-card launch-slate" type="button" onClick={onTurnoCompleto}>
+          <span><Mountain size={30} /></span>
+          <strong>Turno completo</strong>
+          <small>Varios modulos</small>
+        </button>
         <button className="launch-card launch-red" type="button" onClick={() => onOpenCapture('barrenacion')}>
           <span><Drill size={30} /></span>
           <strong>Barrenos</strong>
@@ -1583,6 +1685,102 @@ function MessageCenter({
   )
 }
 
+function TurnoCompletoForm({
+  barrenacion,
+  base,
+  modules,
+  rezagado,
+  seguridad,
+  setBarrenacion,
+  setBase,
+  setModules,
+  setRezagado,
+  setSeguridad,
+}: {
+  barrenacion: BarrenacionRecord
+  base: ShiftBase
+  modules: TurnoModules
+  rezagado: RezagadoRecord
+  seguridad: SeguridadRecord
+  setBarrenacion: (record: BarrenacionRecord) => void
+  setBase: (base: ShiftBase) => void
+  setModules: (modules: TurnoModules) => void
+  setRezagado: (record: RezagadoRecord) => void
+  setSeguridad: (record: SeguridadRecord) => void
+}) {
+  const selectedCount = Object.values(modules).filter(Boolean).length
+
+  function toggleModule(type: RecordType) {
+    const next = { ...modules, [type]: !modules[type] }
+    if (!Object.values(next).some(Boolean)) return
+    setModules(next)
+  }
+
+  return (
+    <div className="turno-completo">
+      <PanelTitle title="Turno completo" subtitle="Datos generales una sola vez" />
+      <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
+        <ShiftBaseFields base={base} setBase={setBase} />
+      </QuickSection>
+
+      <QuickSection title="Trabajos del turno" icon={<ClipboardCheck size={18} />} anchorId="capture-modulos">
+        <div className="quick-choice-grid three">
+          <ChoiceButton active={modules.barrenacion} icon={<Drill size={21} />} label="Barrenacion / voladura" meta="PDF barrenacion" onClick={() => toggleModule('barrenacion')} />
+          <ChoiceButton active={modules.rezagado} icon={<Truck size={21} />} label="Rezagado" meta="PDF rezagado" onClick={() => toggleModule('rezagado')} />
+          <ChoiceButton active={modules.seguridad} icon={<ShieldCheck size={21} />} label="Seguridad" meta="Reporte local" onClick={() => toggleModule('seguridad')} />
+        </div>
+        <div className="turno-summary-strip">
+          <article>
+            <span>Modulos</span>
+            <strong>{selectedCount}</strong>
+          </article>
+          <article>
+            <span>Fecha</span>
+            <strong>{base.fecha}</strong>
+          </article>
+          <article>
+            <span>Turno</span>
+            <strong>{base.turno}</strong>
+          </article>
+        </div>
+      </QuickSection>
+
+      {modules.barrenacion && (
+        <section className="turno-module-section">
+          <BarrenacionForm record={barrenacion} setRecord={setBarrenacion} showBaseFields={false} />
+        </section>
+      )}
+      {modules.rezagado && (
+        <section className="turno-module-section">
+          <RezagadoForm record={rezagado} setRecord={setRezagado} showBaseFields={false} />
+        </section>
+      )}
+      {modules.seguridad && (
+        <section className="turno-module-section">
+          <SeguridadForm record={seguridad} setRecord={setSeguridad} showBaseFields={false} />
+        </section>
+      )}
+    </div>
+  )
+}
+
+function ShiftBaseFields({ base, setBase }: { base: ShiftBase; setBase: (base: ShiftBase) => void }) {
+  return (
+    <div className="form-grid four">
+      <Field label="Supervisor" value={base.supervisor} onChange={(value) => setBase({ ...base, supervisor: value })} required />
+      <Field label="Fecha" type="date" value={base.fecha} onChange={(value) => setBase({ ...base, fecha: value })} required />
+      <label>
+        Turno
+        <select value={base.turno} onChange={(event) => setBase({ ...base, turno: event.target.value as Shift })}>
+          <option value="1">Turno 1</option>
+          <option value="2">Turno 2</option>
+        </select>
+      </label>
+      <Field label="Unidad" value={base.unidad} onChange={(value) => setBase({ ...base, unidad: value })} />
+    </div>
+  )
+}
+
 function BaseFields<T extends BaseRecord>({
   record,
   setRecord,
@@ -1606,7 +1804,15 @@ function BaseFields<T extends BaseRecord>({
   )
 }
 
-function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; setRecord: (record: BarrenacionRecord) => void }) {
+function BarrenacionForm({
+  record,
+  setRecord,
+  showBaseFields = true,
+}: {
+  record: BarrenacionRecord
+  setRecord: (record: BarrenacionRecord) => void
+  showBaseFields?: boolean
+}) {
   const activity = getBarrenacionActivity(record)
   const jumboRows = record.jumbo.length ? record.jumbo : [emptyDrillRow(defaultJumbo)]
   const maquinaRows = record.maquinaPierna.length ? record.maquinaPierna : [emptyDrillRow(defaultJumbo)]
@@ -1668,9 +1874,11 @@ function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; set
   return (
     <>
       <PanelTitle title="Captura de turno barrenacion y voladuras" subtitle="Varios equipos por supervisor" />
-      <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
-        <BaseFields record={record} setRecord={setRecord} />
-      </QuickSection>
+      {showBaseFields && (
+        <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
+          <BaseFields record={record} setRecord={setRecord} />
+        </QuickSection>
+      )}
       <QuickSection title="Actividad" icon={<Drill size={18} />} anchorId="capture-actividad">
         <div className="quick-choice-grid three">
           <ChoiceButton active={activity === 'jumbo'} icon={<Drill size={21} />} label="Jumbo" meta={`${record.jumbo.length || 1} filas`} onClick={() => selectActivity('jumbo')} />
@@ -1788,7 +1996,15 @@ function BarrenacionForm({ record, setRecord }: { record: BarrenacionRecord; set
   )
 }
 
-function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord: (record: RezagadoRecord) => void }) {
+function RezagadoForm({
+  record,
+  setRecord,
+  showBaseFields = true,
+}: {
+  record: RezagadoRecord
+  setRecord: (record: RezagadoRecord) => void
+  showBaseFields?: boolean
+}) {
   const equipment = getRezagadoEquipment(record)
   const scoopRows = record.scoopTram.length ? record.scoopTram : [emptyHaulRow(defaultScoop)]
   const retroRows = record.retro.length ? record.retro : [emptyRetroRow()]
@@ -1837,9 +2053,11 @@ function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord
   return (
     <>
       <PanelTitle title="Captura de turno rezagado" subtitle="Varios equipos y actividades" />
-      <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
-        <BaseFields record={record} setRecord={setRecord} />
-      </QuickSection>
+      {showBaseFields && (
+        <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
+          <BaseFields record={record} setRecord={setRecord} />
+        </QuickSection>
+      )}
       <QuickSection title="Equipo" icon={<Truck size={18} />} anchorId="capture-equipo">
         <div className="quick-choice-grid two">
           <ChoiceButton active={equipment === 'scoop'} icon={<Truck size={21} />} label="Scoop tram" meta={`${record.scoopTram.length || 1} filas`} onClick={() => selectEquipment('scoop')} />
@@ -1956,13 +2174,23 @@ function RezagadoForm({ record, setRecord }: { record: RezagadoRecord; setRecord
   )
 }
 
-function SeguridadForm({ record, setRecord }: { record: SeguridadRecord; setRecord: (record: SeguridadRecord) => void }) {
+function SeguridadForm({
+  record,
+  setRecord,
+  showBaseFields = true,
+}: {
+  record: SeguridadRecord
+  setRecord: (record: SeguridadRecord) => void
+  showBaseFields?: boolean
+}) {
   return (
     <>
       <PanelTitle title="Captura rapida de seguridad" subtitle="Eventos y acciones preventivas" />
-      <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
-        <BaseFields record={record} setRecord={setRecord} />
-      </QuickSection>
+      {showBaseFields && (
+        <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
+          <BaseFields record={record} setRecord={setRecord} />
+        </QuickSection>
+      )}
       <QuickSection title="Resumen" icon={<ShieldCheck size={18} />} anchorId="capture-resumen">
         <div className="form-grid quick">
           <Field label="Accidentes" type="number" value={record.accidentes} onChange={(value) => setRecord({ ...record, accidentes: Number(value) })} />
@@ -2560,6 +2788,16 @@ function normalizeWhatsAppNumber(value: string) {
 
 function resolveApiBase(apiUrl: string) {
   return (apiUrl.trim() || DEFAULT_API_URL).replace(/\/$/, '')
+}
+
+function applyShiftBase<T extends MineRecord>(record: T, base: ShiftBase, updatedAt: string): T {
+  return normalizeRecord({
+    ...record,
+    ...base,
+    updatedAt,
+    deletedAt: undefined,
+    syncedAt: undefined,
+  } as MineRecord) as T
 }
 
 function normalizeRecord(record: MineRecord): MineRecord {
