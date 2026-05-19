@@ -942,6 +942,173 @@ button:hover,
   box-shadow: none;
 }
 
+.capture-assistant-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.capture-assistant-shell .panel-title {
+  margin-bottom: 0;
+}
+
+.assistant-stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.assistant-stepper button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  justify-content: start;
+  min-height: 54px;
+  border-color: #d7e1e7;
+  background: #fff;
+  color: #263744;
+  text-align: left;
+}
+
+.assistant-stepper button span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e8f4f1;
+  color: #007b83;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.assistant-stepper button strong {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.assistant-stepper button.active {
+  background: #102a34;
+  border-color: #102a34;
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(16, 42, 52, 0.18);
+}
+
+.assistant-stepper button.active span {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.assistant-focus-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(23, 37, 51, 0.07);
+}
+
+.assistant-focus-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.assistant-focus-title span {
+  color: #647180;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.assistant-focus-title h2 {
+  margin: 2px 0 0;
+  color: #182836;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.assistant-row-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.assistant-row-tabs {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.assistant-row-tabs button,
+.assistant-small-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+.assistant-row-tabs button {
+  flex: 0 0 auto;
+  border-color: transparent;
+  background: #fff;
+  color: #3f4e5b;
+}
+
+.assistant-row-tabs button.active {
+  background: #e8f4f1;
+  border-color: #b9ddd7;
+  color: #006d74;
+}
+
+.assistant-small-action {
+  border-color: #cdd9df;
+  background: #fff;
+}
+
+.assistant-small-action.danger {
+  color: #9d2c2c;
+}
+
+.assistant-work-grid .choice-button {
+  min-height: 58px;
+}
+
+.assistant-details {
+  margin-top: 0;
+}
+
+.assistant-footer-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.assistant-footer-actions button {
+  justify-content: center;
+}
+
+.assistant-next-action {
+  background: #007b83;
+  border-color: #007b83;
+  color: #fff;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
+}
+
 .turno-summary-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2114,7 +2281,8 @@ th {
 
   .capture-layout-tabs,
   .assistant-module-nav,
-  .assistant-progress-grid {
+  .assistant-progress-grid,
+  .assistant-stepper {
     grid-template-columns: 1fr;
   }
 
@@ -2132,6 +2300,34 @@ th {
   .assistant-module-nav button,
   .capture-layout-tabs button {
     scroll-margin-bottom: 128px;
+  }
+
+  .assistant-focus-card {
+    padding: 14px;
+  }
+
+  .assistant-row-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .assistant-row-tabs {
+    padding-bottom: 2px;
+  }
+
+  .assistant-focus-title h2 {
+    font-size: 20px;
+  }
+
+  .assistant-footer-actions {
+    position: sticky;
+    bottom: calc(88px + env(safe-area-inset-bottom));
+    z-index: 5;
+    padding: 8px;
+    border: 1px solid rgba(209, 220, 228, 0.9);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 16px 32px rgba(16, 32, 43, 0.12);
+    backdrop-filter: blur(12px);
   }
 
   .history-head {
