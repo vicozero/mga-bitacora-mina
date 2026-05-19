@@ -275,6 +275,7 @@ function formatSlackEvent({ action, record }) {
     record.supervisor ? `Supervisor: ${record.supervisor}` : '',
     record.unidad,
     getRecordSummary(record),
+    record.handoffNotes ? `Pase: ${shortText(record.handoffNotes, 90)}` : '',
   ].filter(Boolean)
   return `- ${actionLabel}: ${typeLabel} | ${details.join(' | ')}`
 }
@@ -298,4 +299,9 @@ function getRecordSummary(record) {
     return `Accidentes: ${accidentes}, Incidentes: ${incidentes}, Fuerza laboral: ${fuerzaLaboral}`
   }
   return ''
+}
+
+function shortText(value, maxLength) {
+  const clean = String(value || '').replace(/\s+/g, ' ').trim()
+  return clean.length <= maxLength ? clean : `${clean.slice(0, maxLength - 3)}...`
 }

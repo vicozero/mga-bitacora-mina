@@ -9,8 +9,11 @@ import {
   ClipboardCheck,
   Drill,
   Edit3,
+  AlertTriangle,
   FileSpreadsheet,
   FileDown,
+  Flag,
+  Gauge,
   HardHat,
   History,
   Home,
@@ -18,6 +21,7 @@ import {
   Lock,
   MapPin,
   Menu,
+  Mic,
   MessageSquare,
   MoreVertical,
   Mountain,
@@ -25,8 +29,10 @@ import {
   Plus,
   RefreshCw,
   Save,
+  QrCode,
   Send,
   Settings,
+  CheckCircle2,
   ShieldCheck,
   Trash2,
   Truck,
@@ -60,6 +66,51 @@ type RezagadoAssistantStep = 'equipo' | 'trabajo' | 'produccion' | 'cierre'
 type HaulActivity = 'rezagado' | 'traspaleo' | 'limpia' | 'balastreo' | 'planilla' | 'relleno'
 type RetroActivity = 'amacice' | 'reAmacice' | 'tableo' | 'limpia' | 'balastreo' | 'mtAcequia'
 type ChatMessageType = 'aviso' | 'mensaje' | 'urgente'
+type ReviewInsightStatus = 'ready' | 'warning' | 'critical'
+
+type SpeechRecognitionResultItem = {
+  transcript: string
+}
+
+type SpeechRecognitionResultListItem = {
+  0: SpeechRecognitionResultItem
+}
+
+type SpeechRecognitionResultListLike = {
+  length: number
+  [index: number]: SpeechRecognitionResultListItem
+}
+
+type SpeechRecognitionEventLike = {
+  results: SpeechRecognitionResultListLike
+}
+
+type SpeechRecognitionLike = {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  onerror: (() => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
+
+type BarcodeDetectorLike = {
+  detect: (source: HTMLVideoElement) => Promise<{ rawValue: string }[]>
+}
+
+type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => BarcodeDetectorLike
+
+declare global {
+  interface Window {
+    BarcodeDetector?: BarcodeDetectorConstructor
+    SpeechRecognition?: SpeechRecognitionConstructor
+    webkitSpeechRecognition?: SpeechRecognitionConstructor
+  }
+}
 
 type DrillRow = {
   equipo: string
@@ -167,6 +218,7 @@ type BaseRecord = {
   location?: LocationSnapshot
   closedAt?: string
   closedBy?: string
+  handoffNotes?: string
 }
 
 type BarrenacionRecord = BaseRecord & {
@@ -230,6 +282,7 @@ type CaptureReview = {
   warnings: string[]
   errors: string[]
   kpis: ReturnType<typeof computeKpis>
+  insights: ReviewInsight[]
 }
 type EquipmentFavorites = {
   jumbo: string[]
@@ -255,6 +308,46 @@ type EquipmentSummary = {
   camiones: number
   diesel: number
   horas: number
+}
+
+type EquipmentTimelineItem = {
+  equipo: string
+  tipo: string
+  fecha: string
+  turno: Shift
+  supervisor: string
+  status: ReviewInsightStatus
+  resumen: string
+  handoffNotes: string
+}
+
+type QuickParseResult = {
+  equipment?: string
+  operador?: string
+  ayudante?: string
+  nivelObra?: string
+  destino?: string
+  obra?: string
+  metros?: number
+  metrosPegados?: number
+  barrenos?: number
+  barrenosCargados?: number
+  camiones?: number
+  diesel?: number
+  horas?: number
+  horometroInicial?: number
+  horometroFinal?: number
+  activity?: string
+  notes?: string
+}
+
+type ReviewInsight = {
+  recordId: string
+  title: string
+  status: ReviewInsightStatus
+  completion: number
+  ready: string[]
+  pending: string[]
 }
 
 type ChatMessage = {
@@ -516,6 +609,7 @@ function App() {
     retro: mergeCatalogList(catalog.retro, retroEquipoOptions),
   }), [catalog])
   const equipmentSummary = useMemo(() => buildEquipmentSummary(filtered), [filtered])
+  const equipmentTimeline = useMemo(() => buildEquipmentTimeline(filtered), [filtered])
   const hasTurnoDraft = captureMode === 'turno' && hasTurnoDraftContent(turnoBase, turnoModules, barrenacion, rezagado, seguridad)
   const captureReview = useMemo(
     () => buildCaptureReview(captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId),
@@ -934,6 +1028,12 @@ function App() {
     dailyRecords.slice(0, 22).forEach((record) => {
       pdf.text(`${record.fecha} T${record.turno} | ${labelType(record.type)} | ${record.supervisor || 'Supervisor pendiente'} | ${record.closedAt ? 'Cerrado' : 'Abierto'}`, 16, top)
       top += 8
+      if (record.handoffNotes?.trim() && top < 274) {
+        pdf.setFontSize(8)
+        pdf.text(`Pase: ${fitPlainText(record.handoffNotes, 105)}`, 20, top)
+        pdf.setFontSize(10)
+        top += 6
+      }
     })
     if (dailyRecords.length === 0) pdf.text('No hay registros locales para la fecha de hoy.', 16, top)
     pdf.save(`reporte-diario-mga-${today}.pdf`)
@@ -1493,6 +1593,7 @@ function App() {
             </div>
 
             <EquipmentDashboard rows={equipmentSummary} />
+            <EquipmentTimeline rows={equipmentTimeline} />
 
             <div className="records-table">
               <h2>Registros capturados</h2>
@@ -1647,6 +1748,20 @@ function SaveReviewModal({
         <div className={`review-status ${review.errors.length > 0 ? 'error' : review.warnings.length > 0 ? 'warning' : 'ready'}`}>
           <strong>{reviewStatus}</strong>
           <span>{canSave ? 'Puedes guardar localmente y sincronizar despues.' : 'Corrige los datos marcados antes de guardar.'}</span>
+        </div>
+
+        <div className="closure-board">
+          {review.insights.map((item) => (
+            <article className={`closure-card ${item.status}`} key={item.recordId}>
+              <div>
+                {item.status === 'ready' ? <CheckCircle2 size={19} /> : <AlertTriangle size={19} />}
+                <span>{item.title}</span>
+              </div>
+              <strong>{item.completion}%</strong>
+              <progress value={item.completion} max={100} />
+              <small>{item.pending.length ? `Pendiente: ${item.pending.slice(0, 3).join(', ')}` : 'Listo para cierre'}</small>
+            </article>
+          ))}
         </div>
 
         <div className="review-kpi-grid">
@@ -1909,6 +2024,7 @@ function HistoryScreen({
                   {record.role ? ` - ${roleLabel(record.role)}` : ''}
                   {record.evidencias?.length ? ` - ${record.evidencias.length} evidencia(s)` : ''}
                 </small>
+                {record.handoffNotes && <small className="handoff-preview">Pase: {fitPlainText(record.handoffNotes, 120)}</small>}
               </div>
               <span className={record.updatedAt === record.syncedAt ? 'status-pill synced' : 'status-pill'}>
                 {record.updatedAt === record.syncedAt ? 'En red' : 'Local'}
@@ -2413,9 +2529,74 @@ function BarrenacionAssistantForm({
     setRowIndex(Math.max(0, safeIndex - 1))
   }
 
+  function applyQuickCapture(text: string) {
+    const parsed = parseQuickCapture(text, {
+      equipment: equipmentOptions.jumbo,
+      operadores: catalog.operadores,
+      niveles: catalog.niveles,
+    })
+    const nextActivity: BarrenacionActivity = parsed.activity === 'voladura'
+      ? 'voladura'
+      : parsed.activity === 'maquinaPierna'
+      ? 'maquinaPierna'
+      : parsed.activity === 'jumbo'
+      ? 'jumbo'
+      : activity
+    setStep(parsed.metros || parsed.barrenos || parsed.metrosPegados ? 'produccion' : 'equipo')
+    setRowIndex(0)
+
+    if (nextActivity === 'voladura') {
+      const rows = record.voladuras.length ? record.voladuras : [emptyBlastRow()]
+      setRecord({
+        ...record,
+        activeActivity: 'voladura',
+        voladuras: rows.map((row, index) => index === 0 ? {
+          ...row,
+          obra: parsed.obra ?? row.obra,
+          oficial: parsed.operador ?? row.oficial,
+          ayudante: parsed.ayudante ?? row.ayudante,
+          barrenosPegados: parsed.barrenos ?? row.barrenosPegados,
+          metrosPegados: parsed.metrosPegados ?? parsed.metros ?? row.metrosPegados,
+          horasServicio: parsed.horas ?? row.horasServicio,
+          observaciones: mergeNotes(row.observaciones, parsed.notes),
+        } : row),
+      })
+      return
+    }
+
+    const kind = nextActivity === 'maquinaPierna' ? 'maquinaPierna' : 'jumbo'
+    const rows = kind === 'maquinaPierna'
+      ? (record.maquinaPierna.length ? record.maquinaPierna : [emptyDrillRow(defaultJumbo)])
+      : (record.jumbo.length ? record.jumbo : [emptyDrillRow(defaultJumbo)])
+    const nextRows = rows.map((row, index) => index === 0 ? {
+      ...row,
+      equipo: parsed.equipment ?? row.equipo,
+      operador: parsed.operador ?? row.operador,
+      ayudante: parsed.ayudante ?? row.ayudante,
+      nivelObra: parsed.nivelObra ?? row.nivelObra,
+      barrenosDados: parsed.barrenos ?? row.barrenosDados,
+      barrenosCargados: parsed.barrenosCargados ?? row.barrenosCargados,
+      metrosDados: parsed.metros ?? row.metrosDados,
+      horasServicio: parsed.horas ?? row.horasServicio,
+      horometroDieselInicial: parsed.horometroInicial ?? row.horometroDieselInicial,
+      horometroDieselFinal: parsed.horometroFinal ?? row.horometroDieselFinal,
+    } : row)
+    setRecord({
+      ...record,
+      activeActivity: kind,
+      jumbo: kind === 'jumbo' ? nextRows : record.jumbo,
+      maquinaPierna: kind === 'maquinaPierna' ? nextRows : record.maquinaPierna,
+    })
+  }
+
   return (
     <div className="capture-assistant-shell">
       <PanelTitle title="Asistente barrenacion y voladuras" subtitle="Captura un registro corto y agrega mas equipos si hace falta" />
+      <QuickCaptureBar
+        label="Captura rapida"
+        placeholder="Ej. JL-019 operador Juan nivel 10300 12 barrenos 36 metros"
+        onApply={applyQuickCapture}
+      />
       <AssistantStepNav steps={steps} active={step} onChange={setStep} />
 
       <section className="assistant-focus-card">
@@ -2451,13 +2632,16 @@ function BarrenacionAssistantForm({
                 <Field label="RPA / Cfte" value={blastRow.rpaCfte} onChange={(value) => updateBlast({ rpaCfte: value })} />
               </div>
             ) : (
-              <div className="form-grid quick">
-                <Field label="Equipo" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill({ equipo: value })} />
+              <>
+                <QrScanButton onResult={(value) => updateDrill({ equipo: resolveScannedEquipment(value, drillEquipmentOptions) })} />
+                <div className="form-grid quick">
+                  <Field label="Equipo" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill({ equipo: value })} />
                 <Field label="Operador" value={drillRow.operador} suggestions={catalog.operadores} onChange={(value) => updateDrill({ operador: value })} />
                 <Field label="Ayudante" value={drillRow.ayudante} onChange={(value) => updateDrill({ ayudante: value })} />
                 <Field label="Nivel / obra" value={drillRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateDrill({ nivelObra: value })} />
                 <Field label="RPA / Cfte" value={drillRow.rpaCfte} onChange={(value) => updateDrill({ rpaCfte: value })} />
               </div>
+              </>
             )}
           </>
         )}
@@ -2652,9 +2836,72 @@ function RezagadoAssistantForm({
     setRowIndex(Math.max(0, safeIndex - 1))
   }
 
+  function applyQuickCapture(text: string) {
+    const parsed = parseQuickCapture(text, {
+      equipment: [...equipmentOptions.scoop, ...equipmentOptions.retro],
+      operadores: catalog.operadores,
+      niveles: catalog.niveles,
+    })
+    const nextEquipment: RezagadoEquipment = parsed.activity === 'retro' || (parsed.equipment && equipmentOptions.retro.includes(parsed.equipment))
+      ? 'retro'
+      : parsed.activity === 'scoop' || (parsed.equipment && equipmentOptions.scoop.includes(parsed.equipment))
+      ? 'scoop'
+      : equipment
+    setStep(parsed.camiones || parsed.diesel || parsed.metros || parsed.horometroFinal ? 'produccion' : 'equipo')
+    setRowIndex(0)
+
+    if (nextEquipment === 'retro') {
+      const rows = record.retro.length ? record.retro : [emptyRetroRow()]
+      const activityKey = isRetroActivity(parsed.activity) ? parsed.activity : 'amacice'
+      setRecord({
+        ...record,
+        activeEquipment: 'retro',
+        retro: rows.map((row, index) => index === 0 ? {
+          ...row,
+          selectedActivities: Array.from(new Set([...getSelectedRetroActivities(row), activityKey])),
+          equipo: parsed.equipment ?? row.equipo,
+          operador: parsed.operador ?? row.operador,
+          nivelObra: parsed.nivelObra ?? row.nivelObra,
+          [activityKey]: parsed.metros ?? row[activityKey],
+          horometroInicial: parsed.horometroInicial ?? row.horometroInicial,
+          horometroFinal: parsed.horometroFinal ?? row.horometroFinal,
+          diesel: parsed.diesel ?? row.diesel,
+          observaciones: mergeNotes(row.observaciones, parsed.notes),
+        } : row),
+      })
+      return
+    }
+
+    const rows = record.scoopTram.length ? record.scoopTram : [emptyHaulRow(defaultScoop)]
+    const activityKey = isHaulActivity(parsed.activity) ? parsed.activity : 'rezagado'
+    setRecord({
+      ...record,
+      activeEquipment: 'scoop',
+      scoopTram: rows.map((row, index) => index === 0 ? {
+        ...row,
+        selectedActivities: Array.from(new Set([...getSelectedHaulActivities(row), activityKey])),
+        equipo: parsed.equipment ?? row.equipo,
+        operador: parsed.operador ?? row.operador,
+        nivelObra: parsed.nivelObra ?? row.nivelObra,
+        destino: parsed.destino ?? row.destino,
+        [activityKey]: parsed.metros ?? row[activityKey],
+        camiones: parsed.camiones ?? row.camiones,
+        horometroInicial: parsed.horometroInicial ?? row.horometroInicial,
+        horometroFinal: parsed.horometroFinal ?? row.horometroFinal,
+        diesel: parsed.diesel ?? row.diesel,
+        observaciones: mergeNotes(row.observaciones, parsed.notes),
+      } : row),
+    })
+  }
+
   return (
     <div className="capture-assistant-shell">
       <PanelTitle title="Asistente rezagado" subtitle="Selecciona actividades y captura cantidades por equipo" />
+      <QuickCaptureBar
+        label="Captura rapida"
+        placeholder="Ej. ST-018 operador Juan nivel 10300 rezagado 8 camiones diesel 40"
+        onApply={applyQuickCapture}
+      />
       <AssistantStepNav steps={steps} active={step} onChange={setStep} />
 
       <section className="assistant-focus-card">
@@ -2676,18 +2923,24 @@ function RezagadoAssistantForm({
               onSelect={setRowIndex}
             />
             {isScoop ? (
-              <div className="form-grid quick">
-                <Field label="Equipo" value={scoopRow.equipo} options={scoopOptions} onChange={(value) => updateScoopRow({ equipo: value })} />
-                <Field label="Operador" value={scoopRow.operador} suggestions={catalog.operadores} onChange={(value) => updateScoopRow({ operador: value })} />
-                <Field label="Nivel / obra" value={scoopRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ nivelObra: value })} />
-                <Field label="Destino" value={scoopRow.destino} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ destino: value })} />
-              </div>
+              <>
+                <QrScanButton onResult={(value) => updateScoopRow({ equipo: resolveScannedEquipment(value, scoopOptions) })} />
+                <div className="form-grid quick">
+                  <Field label="Equipo" value={scoopRow.equipo} options={scoopOptions} onChange={(value) => updateScoopRow({ equipo: value })} />
+                  <Field label="Operador" value={scoopRow.operador} suggestions={catalog.operadores} onChange={(value) => updateScoopRow({ operador: value })} />
+                  <Field label="Nivel / obra" value={scoopRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ nivelObra: value })} />
+                  <Field label="Destino" value={scoopRow.destino} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ destino: value })} />
+                </div>
+              </>
             ) : (
-              <div className="form-grid quick">
-                <Field label="Equipo" value={retroRow.equipo} options={retroOptions} onChange={(value) => updateRetroRow({ equipo: value })} />
-                <Field label="Operador" value={retroRow.operador} suggestions={catalog.operadores} onChange={(value) => updateRetroRow({ operador: value })} />
-                <Field label="Nivel / obra" value={retroRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateRetroRow({ nivelObra: value })} />
-              </div>
+              <>
+                <QrScanButton onResult={(value) => updateRetroRow({ equipo: resolveScannedEquipment(value, retroOptions) })} />
+                <div className="form-grid quick">
+                  <Field label="Equipo" value={retroRow.equipo} options={retroOptions} onChange={(value) => updateRetroRow({ equipo: value })} />
+                  <Field label="Operador" value={retroRow.operador} suggestions={catalog.operadores} onChange={(value) => updateRetroRow({ operador: value })} />
+                  <Field label="Nivel / obra" value={retroRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateRetroRow({ nivelObra: value })} />
+                </div>
+              </>
             )}
           </>
         )}
@@ -2859,6 +3112,162 @@ function AssistantRowTools({
   )
 }
 
+function QuickCaptureBar({
+  label,
+  onApply,
+  placeholder,
+}: {
+  label: string
+  onApply: (text: string) => void
+  placeholder: string
+}) {
+  const [text, setText] = useState('')
+  const [listening, setListening] = useState(false)
+  const [message, setMessage] = useState('')
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+
+  function apply() {
+    const clean = text.trim()
+    if (!clean) return
+    onApply(clean)
+    setMessage('Captura aplicada.')
+    setText('')
+  }
+
+  function toggleVoice() {
+    if (listening) {
+      recognitionRef.current?.stop()
+      setListening(false)
+      return
+    }
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition
+    if (!Recognition) {
+      setMessage('Voz no disponible en este dispositivo.')
+      return
+    }
+    const recognition = new Recognition()
+    recognition.lang = 'es-MX'
+    recognition.interimResults = false
+    recognition.continuous = false
+    recognition.onresult = (event) => {
+      const transcript = Array.from({ length: event.results.length }, (_, index) => event.results[index]?.[0]?.transcript ?? '')
+        .join(' ')
+        .trim()
+      if (transcript) setText((current) => `${current} ${transcript}`.trim())
+    }
+    recognition.onerror = () => {
+      setMessage('No se pudo escuchar. Revisa permisos del microfono.')
+      setListening(false)
+    }
+    recognition.onend = () => setListening(false)
+    recognitionRef.current = recognition
+    setListening(true)
+    setMessage('')
+    recognition.start()
+  }
+
+  return (
+    <div className="quick-capture-bar">
+      <div className="quick-capture-head">
+        <span><Gauge size={15} /> {label}</span>
+        <button className={listening ? 'active' : ''} type="button" onClick={toggleVoice}>
+          <Mic size={16} /> {listening ? 'Escuchando' : 'Voz'}
+        </button>
+      </div>
+      <div className="quick-capture-input">
+        <textarea
+          aria-label={label}
+          placeholder={placeholder}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          rows={2}
+        />
+        <button type="button" onClick={apply}>
+          Aplicar
+        </button>
+      </div>
+      {message && <small>{message}</small>}
+    </div>
+  )
+}
+
+function QrScanButton({ onResult }: { onResult: (value: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [message, setMessage] = useState('')
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const activeRef = useRef(false)
+
+  useEffect(() => () => stop(), [])
+
+  function stop() {
+    activeRef.current = false
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    setOpen(false)
+  }
+
+  async function start() {
+    if (!window.BarcodeDetector) {
+      setMessage('QR no disponible en este navegador.')
+      return
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMessage('Camara no disponible en este dispositivo.')
+      return
+    }
+    try {
+      setOpen(true)
+      setMessage('Buscando codigo...')
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      streamRef.current = stream
+      const video = videoRef.current
+      if (!video) return
+      video.srcObject = stream
+      await video.play()
+      const detector = new window.BarcodeDetector({ formats: ['qr_code', 'code_128', 'code_39'] })
+      activeRef.current = true
+      const scan = async () => {
+        if (!activeRef.current || !videoRef.current) return
+        try {
+          const codes = await detector.detect(videoRef.current)
+          const value = codes[0]?.rawValue
+          if (value) {
+            onResult(value)
+            setMessage('Codigo aplicado.')
+            stop()
+            return
+          }
+        } catch {
+          // Keep the scanner open; some frames are not readable.
+        }
+        window.requestAnimationFrame(scan)
+      }
+      window.requestAnimationFrame(scan)
+    } catch {
+      setOpen(false)
+      setMessage('No se pudo abrir camara.')
+    }
+  }
+
+  return (
+    <div className="qr-scan">
+      <button type="button" onClick={() => void start()}>
+        <QrCode size={16} /> QR equipo
+      </button>
+      {message && <small>{message}</small>}
+      {open && (
+        <div className="qr-scan-panel">
+          <video ref={videoRef} muted playsInline />
+          <button type="button" onClick={stop}>
+            Cerrar
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RecordExtrasPanel<T extends MineRecord>({
   record,
   setRecord,
@@ -2911,6 +3320,12 @@ function RecordExtrasPanel<T extends MineRecord>({
       () => setLocationMessage('No se pudo obtener ubicacion. Revisa permisos del dispositivo.'),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     )
+  }
+
+  function appendHandoff(text: string) {
+    const current = record.handoffNotes?.trim()
+    const next = current ? `${current}\n${text}` : text
+    setRecord({ ...record, handoffNotes: next, updatedAt: nowIso(), syncedAt: undefined })
   }
 
   return (
@@ -2966,6 +3381,21 @@ function RecordExtrasPanel<T extends MineRecord>({
           ))}
         </div>
       )}
+
+      <div className="handoff-panel">
+        <TextArea
+          label="Pase de guardia / pendientes"
+          value={record.handoffNotes ?? ''}
+          onChange={(value) => setRecord({ ...record, handoffNotes: value, updatedAt: nowIso(), syncedAt: undefined })}
+        />
+        <div className="handoff-tags" aria-label="Pendientes frecuentes">
+          {['Continuar frente', 'Revisar equipo', 'Falta limpieza', 'Pendiente ventilacion', 'Falla mecanica', 'Material pendiente'].map((item) => (
+            <button key={item} type="button" onClick={() => appendHandoff(item)}>
+              <Flag size={14} /> {item}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <SignaturePad value={record.signatureDataUrl ?? ''} onChange={(value) => setRecord({ ...record, signatureDataUrl: value, updatedAt: nowIso(), syncedAt: undefined })} />
     </div>
@@ -3686,6 +4116,31 @@ function EquipmentDashboard({ rows }: { rows: EquipmentSummary[] }) {
   )
 }
 
+function EquipmentTimeline({ rows }: { rows: EquipmentTimelineItem[] }) {
+  return (
+    <section className="equipment-timeline">
+      <div className="section-heading">
+        <h2>Historial por equipo</h2>
+      </div>
+      {rows.length === 0 ? (
+        <p>Sin historial por equipo para el filtro actual.</p>
+      ) : (
+        <div className="equipment-timeline-list">
+          {rows.slice(0, 10).map((row) => (
+            <article className={row.status} key={`${row.tipo}-${row.equipo}-${row.fecha}-${row.turno}-${row.resumen}`}>
+              <span>{row.tipo}</span>
+              <strong>{row.equipo}</strong>
+              <small>{row.fecha} - Turno {row.turno} - {row.supervisor || 'Supervisor pendiente'}</small>
+              <p>{row.resumen}</p>
+              {row.handoffNotes && <em>{row.handoffNotes}</em>}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 async function buildBarrenacionPdf(record: BarrenacionRecord) {
   const pdfDoc = await loadTemplatePdf(BARRENACION_TEMPLATE)
   const page = pdfDoc.getPage(0)
@@ -3910,7 +4365,12 @@ async function buildBarrenacionExcel(record: BarrenacionRecord) {
   sheet.getCell(`H${activitiesStart + 1}`).value = record.comentarios
   sheet.mergeCells(`M${activitiesStart + 1}:Q${activitiesStart + 6}`)
   sheet.getCell(`M${activitiesStart + 1}`).value = record.inasistencias
-  styleUsedCells(sheet, 1, activitiesStart + 6, 21)
+  const handoffRow = activitiesStart + 8
+  sheet.mergeCells(`A${handoffRow}:C${handoffRow}`)
+  sheet.getCell(`A${handoffRow}`).value = 'PASE DE GUARDIA'
+  sheet.mergeCells(`D${handoffRow}:Q${handoffRow + 2}`)
+  sheet.getCell(`D${handoffRow}`).value = record.handoffNotes
+  styleUsedCells(sheet, 1, handoffRow + 2, 21)
   return workbook.xlsx.writeBuffer()
 }
 
@@ -3970,7 +4430,12 @@ async function buildRezagadoExcel(record: RezagadoRecord) {
   ]
   addHeaderRow(sheet, retroStart, retroHeaders)
   addRetroExcelRows(sheet, retroStart + 1, record.retro.filter(hasRetroData), 14)
-  styleUsedCells(sheet, 1, retroStart + 14, 16)
+  const handoffRow = retroStart + 16
+  sheet.mergeCells(`A${handoffRow}:C${handoffRow}`)
+  sheet.getCell(`A${handoffRow}`).value = 'PASE DE GUARDIA'
+  sheet.mergeCells(`D${handoffRow}:P${handoffRow + 2}`)
+  sheet.getCell(`D${handoffRow}`).value = record.handoffNotes
+  styleUsedCells(sheet, 1, handoffRow + 2, 16)
   return workbook.xlsx.writeBuffer()
 }
 
@@ -4268,6 +4733,7 @@ function normalizeRecord(record: MineRecord): MineRecord {
     location: isLocationSnapshot(record.location) ? record.location : undefined,
     closedAt: typeof record.closedAt === 'string' ? record.closedAt : undefined,
     closedBy: typeof record.closedBy === 'string' ? record.closedBy : undefined,
+    handoffNotes: typeof record.handoffNotes === 'string' ? record.handoffNotes : '',
   } as MineRecord
 
   if (baseRecord.type === 'barrenacion') {
@@ -4498,6 +4964,50 @@ function buildEquipmentSummary(records: MineRecord[]): EquipmentSummary[] {
   })
 }
 
+function buildEquipmentTimeline(records: MineRecord[]): EquipmentTimelineItem[] {
+  const items: EquipmentTimelineItem[] = []
+  function push(record: MineRecord, tipo: string, equipo: string, resumen: string, status: ReviewInsightStatus = 'ready') {
+    const cleanEquipo = equipo.trim()
+    if (!cleanEquipo) return
+    items.push({
+      equipo: cleanEquipo,
+      tipo,
+      fecha: record.fecha,
+      turno: record.turno,
+      supervisor: record.supervisor,
+      status,
+      resumen,
+      handoffNotes: record.handoffNotes?.trim() ?? '',
+    })
+  }
+
+  records.forEach((record) => {
+    if (record.type === 'barrenacion') {
+      record.jumbo.filter((row) => hasDrillData(row) || row.equipo.trim()).forEach((row) => {
+        push(record, 'Jumbo', row.equipo, `${valueText(row.barrenosDados, true)} barrenos | ${valueText(row.metrosDados, true)} m | ${row.nivelObra || 'Sin nivel'}`, row.metrosDados || row.barrenosDados ? 'ready' : 'warning')
+      })
+      record.maquinaPierna.filter((row) => hasDrillData(row) || row.equipo.trim()).forEach((row) => {
+        push(record, 'Maquina pierna', row.equipo, `${valueText(row.barrenosDados, true)} barrenos | ${valueText(row.metrosDados, true)} m | ${row.nivelObra || 'Sin nivel'}`, row.metrosDados || row.barrenosDados ? 'ready' : 'warning')
+      })
+      record.voladuras.filter(hasBlastData).forEach((row) => {
+        push(record, 'Voladura', row.obra || row.rpaCfte || 'Frente sin nombre', `${valueText(row.barrenosPegados, true)} barrenos | ${valueText(row.metrosPegados, true)} m`, row.metrosPegados || row.barrenosPegados ? 'ready' : 'warning')
+      })
+    }
+    if (record.type === 'rezagado') {
+      record.scoopTram.filter((row) => hasHaulData(row) || row.equipo.trim()).forEach((row) => {
+        const total = row.rezagado + row.traspaleo + row.limpia + row.balastreo + row.planilla + row.relleno
+        push(record, 'Scoop tram', row.equipo, `${valueText(total, true)} actividad | ${valueText(row.camiones, true)} camiones | ${valueText(row.diesel, true)} diesel`, total || row.camiones ? 'ready' : 'warning')
+      })
+      record.retro.filter((row) => hasRetroData(row) || row.equipo.trim()).forEach((row) => {
+        const total = row.amacice + row.reAmacice + row.tableo + row.limpia + row.balastreo + row.mtAcequia
+        push(record, 'Retro', row.equipo, `${valueText(total, true)} actividad | ${valueText(row.diesel, true)} diesel | ${row.nivelObra || 'Sin nivel'}`, total ? 'ready' : 'warning')
+      })
+    }
+  })
+
+  return items.sort((a, b) => `${b.fecha}${b.turno}`.localeCompare(`${a.fecha}${a.turno}`))
+}
+
 function prioritizeOptions(options: string[], selected: string, favorites: string[]) {
   const seen = new Set<string>()
   const next: string[] = []
@@ -4508,6 +5018,126 @@ function prioritizeOptions(options: string[], selected: string, favorites: strin
     next.push(value)
   })
   return next
+}
+
+function parseQuickCapture(text: string, options: { equipment: string[]; operadores?: string[]; niveles?: string[] }): QuickParseResult {
+  const normalized = normalizePlainText(text)
+  const equipment = findKnownValue(normalized, options.equipment)
+  const operador = findKnownValue(normalized, options.operadores ?? []) ?? extractPhrase(normalized, ['operador', 'operadora', 'oficial'])
+  const ayudante = extractPhrase(normalized, ['ayudante'])
+  const nivelObra = findKnownValue(normalized, options.niveles ?? []) ?? extractPhrase(normalized, ['nivel', 'obra', 'frente'])
+  const destino = findKnownValue(normalized, options.niveles ?? []) ?? extractPhrase(normalized, ['destino'])
+  const activity = detectActivity(normalized)
+  return {
+    equipment,
+    operador,
+    ayudante,
+    nivelObra,
+    destino,
+    obra: nivelObra,
+    activity,
+    metros: extractNumber(normalized, ['metros dados', 'metros', 'm']),
+    metrosPegados: extractNumber(normalized, ['metros pegados', 'pegados']),
+    barrenos: extractNumber(normalized, ['barrenos dados', 'barrenos']),
+    barrenosCargados: extractNumber(normalized, ['barrenos cargados', 'cargados']),
+    camiones: extractNumber(normalized, ['camiones']),
+    diesel: extractNumber(normalized, ['diesel', 'litros']),
+    horas: extractNumber(normalized, ['horas', 'hrs']),
+    horometroInicial: extractNumber(normalized, ['horometro inicial', 'hor inicial']),
+    horometroFinal: extractNumber(normalized, ['horometro final', 'hor final']),
+    notes: text.trim(),
+  }
+}
+
+function normalizePlainText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w.\-\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function findKnownValue(text: string, values: string[]) {
+  const normalizedValues = values
+    .map((value) => ({ value, normalized: normalizePlainText(value) }))
+    .sort((a, b) => b.normalized.length - a.normalized.length)
+  return normalizedValues.find((item) => text.includes(item.normalized) || item.normalized.includes(text))?.value
+}
+
+function extractPhrase(text: string, labels: string[]) {
+  const stopWords = [
+    'ayudante',
+    'nivel',
+    'obra',
+    'frente',
+    'destino',
+    'metros',
+    'barrenos',
+    'cargados',
+    'pegados',
+    'camiones',
+    'diesel',
+    'horas',
+    'horometro',
+    'rezagado',
+    'traspaleo',
+    'limpia',
+    'balastreo',
+    'planilla',
+    'relleno',
+    'amacice',
+    'tableo',
+  ]
+  for (const label of labels) {
+    const match = text.match(new RegExp(`${label}\\s+(.+?)(?=\\s+(?:${stopWords.join('|')})\\b|$)`))
+    const value = match?.[1]?.replace(/\s+\d+(?:[.,]\d+)?$/, '').trim()
+    if (value) return toTitle(value)
+  }
+  return undefined
+}
+
+function extractNumber(text: string, labels: string[]) {
+  for (const label of labels) {
+    const before = text.match(new RegExp(`(\\d+(?:[.,]\\d+)?)\\s*${label}`))
+    const after = text.match(new RegExp(`${label}\\s*(?:de)?\\s*(\\d+(?:[.,]\\d+)?)`))
+    const value = before?.[1] ?? after?.[1]
+    if (value) return Number(value.replace(',', '.'))
+  }
+  return undefined
+}
+
+function detectActivity(text: string) {
+  if (text.includes('voladura') || text.includes('pegados')) return 'voladura'
+  if (text.includes('maquina pierna') || text.includes('pierna')) return 'maquinaPierna'
+  if (text.includes('jumbo')) return 'jumbo'
+  if (text.includes('retro')) return 'retro'
+  if (text.includes('scoop')) return 'scoop'
+  const haul = haulActivityKeys.find((key) => text.includes(key) || text.includes(normalizePlainText(haulActivityLabels[key])))
+  if (haul) return haul
+  return retroActivityKeys.find((key) => text.includes(key) || text.includes(normalizePlainText(retroActivityLabels[key])))
+}
+
+function toTitle(value: string) {
+  return value
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.length <= 3 ? word.toUpperCase() : `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(' ')
+}
+
+function mergeNotes(current: string, note?: string) {
+  const clean = note?.trim()
+  if (!clean) return current
+  if (!current.trim()) return clean
+  if (normalizePlainText(current).includes(normalizePlainText(clean))) return current
+  return `${current.trim()}\n${clean}`
+}
+
+function resolveScannedEquipment(value: string, options: string[]) {
+  const normalized = normalizePlainText(value)
+  return findKnownValue(normalized, options) ?? value.trim()
 }
 
 function sum<T>(rows: T[], key: keyof T) {
@@ -4576,6 +5206,7 @@ function buildCaptureReview(
     warnings,
     errors,
     kpis: computeKpis(records),
+    insights: buildReviewInsights(records, warnings, errors),
   }
 }
 
@@ -4605,6 +5236,9 @@ function validateReviewRecord(record: MineRecord, warnings: string[]) {
   const label = labelType(record.type)
   if (!record.supervisor.trim()) warnings.push(`${label}: falta supervisor.`)
   if (!record.fecha) warnings.push(`${label}: falta fecha.`)
+  if (!record.signatureDataUrl) warnings.push(`${label}: falta firma del supervisor.`)
+  if ((record.evidencias?.length ?? 0) === 0) warnings.push(`${label}: agrega al menos una evidencia fotografica si aplica.`)
+  if (!record.handoffNotes?.trim()) warnings.push(`${label}: pase de guardia pendiente.`)
   if (record.type === 'barrenacion') validateBarrenacionReview(record, warnings)
   if (record.type === 'rezagado') validateRezagadoReview(record, warnings)
   if (record.type === 'seguridad') validateSeguridadReview(record, warnings)
@@ -4653,6 +5287,64 @@ function validateSeguridadReview(record: SeguridadRecord, warnings: string[]) {
   if (!record.accidentes && !record.incidentes && !record.fuerzaLaboral && !hasText) {
     warnings.push('Seguridad: no hay resumen, hallazgo o fuerza laboral capturada.')
   }
+}
+
+function buildReviewInsights(records: MineRecord[], warnings: string[], errors: string[]): ReviewInsight[] {
+  return records.map((record) => {
+    const ready: string[] = []
+    const pending: string[] = []
+    if (record.supervisor.trim()) ready.push('Supervisor')
+    else pending.push('Supervisor')
+    if (record.fecha) ready.push('Fecha')
+    else pending.push('Fecha')
+    if (record.signatureDataUrl) ready.push('Firma')
+    else pending.push('Firma')
+    if ((record.evidencias?.length ?? 0) > 0) ready.push('Evidencia')
+    else pending.push('Evidencia')
+    if (record.location) ready.push('Ubicacion')
+    else pending.push('Ubicacion')
+    if (record.handoffNotes?.trim()) ready.push('Pase de guardia')
+    else pending.push('Pase de guardia')
+
+    if (record.type === 'barrenacion') {
+      const hasProduction = [...record.jumbo, ...record.maquinaPierna].some((row) => row.metrosDados || row.barrenosDados || row.barrenosCargados)
+        || record.voladuras.some((row) => row.metrosPegados || row.barrenosPegados)
+      if (hasProduction) ready.push('Produccion')
+      else pending.push('Produccion')
+    }
+
+    if (record.type === 'rezagado') {
+      const hasProduction = record.scoopTram.some((row) => row.rezagado || row.traspaleo || row.limpia || row.balastreo || row.planilla || row.relleno || row.camiones)
+        || record.retro.some((row) => row.amacice || row.reAmacice || row.tableo || row.limpia || row.balastreo || row.mtAcequia)
+      if (hasProduction) ready.push('Produccion')
+      else pending.push('Produccion')
+    }
+
+    if (record.type === 'seguridad') {
+      const hasSafety = record.accidentes || record.incidentes || record.fuerzaLaboral || record.observaciones || record.correccionesMejoras
+      if (hasSafety) ready.push('Seguridad')
+      else pending.push('Seguridad')
+    }
+
+    const completion = Math.round((ready.length / Math.max(ready.length + pending.length, 1)) * 100)
+    const recordPrefix = labelType(record.type).split(' ')[0]
+    const status: ReviewInsightStatus = errors.some((item) => item.includes(recordPrefix))
+      ? 'critical'
+      : completion >= 80
+      ? 'ready'
+      : warnings.some((item) => item.includes(recordPrefix))
+      ? 'warning'
+      : 'warning'
+
+    return {
+      recordId: record.id,
+      title: labelType(record.type),
+      status,
+      completion,
+      ready,
+      pending,
+    }
+  })
 }
 
 function labelType(type: RecordType) {
@@ -4780,6 +5472,11 @@ function valueText(value: string | number | undefined, showZero = false) {
     return Number.isInteger(value) ? String(value) : value.toFixed(2)
   }
   return value
+}
+
+function fitPlainText(value: string, maxLength: number) {
+  const clean = value.replace(/\s+/g, ' ').trim()
+  return clean.length <= maxLength ? clean : `${clean.slice(0, Math.max(0, maxLength - 3))}...`
 }
 
 function downloadBlob(content: BlobPart | Uint8Array, filename: string, type: string) {
@@ -5039,7 +5736,7 @@ function modulesChanged(modules: TurnoModules) {
 }
 
 function hasRecordDraftData(record: MineRecord) {
-  if ((record.evidencias?.length ?? 0) > 0 || record.signatureDataUrl || record.location || record.closedAt) return true
+  if ((record.evidencias?.length ?? 0) > 0 || record.signatureDataUrl || record.location || record.closedAt || record.handoffNotes) return true
   if (hasShiftBaseData(record)) return true
   if (record.type === 'barrenacion') {
     return Boolean(
