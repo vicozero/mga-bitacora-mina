@@ -44,6 +44,7 @@ import './App.css'
 type Shift = '1' | '2'
 type AppSection = 'home' | 'captura' | 'historial' | 'dashboard'
 type CaptureMode = 'modulo' | 'turno'
+type CaptureLayout = 'asistente' | 'formulario'
 type RecordType = 'barrenacion' | 'rezagado' | 'seguridad'
 type BarrenacionActivity = 'jumbo' | 'maquinaPierna' | 'voladura'
 type RezagadoEquipment = 'scoop' | 'retro'
@@ -184,6 +185,7 @@ type ShiftBase = Pick<BaseRecord, 'supervisor' | 'fecha' | 'turno' | 'unidad'>
 type TurnoModules = Record<RecordType, boolean>
 type CaptureDraft = {
   captureMode: CaptureMode
+  captureLayout: CaptureLayout
   formType: RecordType
   turnoBase: ShiftBase
   turnoModules: TurnoModules
@@ -381,6 +383,7 @@ function App() {
   const initialDraft = useMemo(loadCaptureDraft, [])
   const [section, setSection] = useState<AppSection>(getInitialSection)
   const [captureMode, setCaptureMode] = useState<CaptureMode>(initialDraft?.captureMode ?? 'modulo')
+  const [captureLayout, setCaptureLayout] = useState<CaptureLayout>(initialDraft?.captureLayout ?? 'asistente')
   const [formType, setFormType] = useState<RecordType>(initialDraft?.formType ?? 'barrenacion')
   const [turnoBase, setTurnoBase] = useState<ShiftBase>(initialDraft?.turnoBase ?? { ...baseDefaults })
   const [turnoModules, setTurnoModules] = useState<TurnoModules>(initialDraft?.turnoModules ?? { ...defaultTurnoModules })
@@ -453,6 +456,7 @@ function App() {
   useEffect(() => {
     const draft: CaptureDraft = {
       captureMode,
+      captureLayout,
       formType,
       turnoBase,
       turnoModules,
@@ -467,7 +471,7 @@ function App() {
       return
     }
     localStorage.removeItem(CAPTURE_DRAFT_KEY)
-  }, [captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId])
+  }, [captureMode, captureLayout, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -698,6 +702,7 @@ function App() {
     }
     if (captureMode !== 'turno' || section !== 'captura') resetTurnoCompleto()
     setCaptureMode('turno')
+    setCaptureLayout('asistente')
     setSection('captura')
     closeMenus()
     setMessage('Turno completo listo. Captura los datos generales una sola vez.')
@@ -1147,11 +1152,13 @@ function App() {
               <TurnoCompletoForm
                 barrenacion={barrenacion}
                 base={turnoBase}
+                captureLayout={captureLayout}
                 modules={turnoModules}
                 rezagado={rezagado}
                 seguridad={seguridad}
                 setBarrenacion={setBarrenacion}
                 setBase={setTurnoBase}
+                setCaptureLayout={setCaptureLayout}
                 setModules={setTurnoModules}
                 setRezagado={setRezagado}
                 setSeguridad={setSeguridad}
@@ -1824,27 +1831,34 @@ function MessageCenter({
 function TurnoCompletoForm({
   barrenacion,
   base,
+  captureLayout,
   modules,
   rezagado,
   seguridad,
   setBarrenacion,
   setBase,
+  setCaptureLayout,
   setModules,
   setRezagado,
   setSeguridad,
 }: {
   barrenacion: BarrenacionRecord
   base: ShiftBase
+  captureLayout: CaptureLayout
   modules: TurnoModules
   rezagado: RezagadoRecord
   seguridad: SeguridadRecord
   setBarrenacion: (record: BarrenacionRecord) => void
   setBase: (base: ShiftBase) => void
+  setCaptureLayout: (layout: CaptureLayout) => void
   setModules: (modules: TurnoModules) => void
   setRezagado: (record: RezagadoRecord) => void
   setSeguridad: (record: SeguridadRecord) => void
 }) {
   const selectedCount = Object.values(modules).filter(Boolean).length
+  const enabledModules = (['barrenacion', 'rezagado', 'seguridad'] as const).filter((type) => modules[type])
+  const [assistantModule, setAssistantModule] = useState<RecordType>('barrenacion')
+  const activeAssistantModule = modules[assistantModule] ? assistantModule : enabledModules[0] ?? 'barrenacion'
 
   function toggleModule(type: RecordType) {
     const next = { ...modules, [type]: !modules[type] }
@@ -1855,6 +1869,14 @@ function TurnoCompletoForm({
   return (
     <div className="turno-completo">
       <PanelTitle title="Turno completo" subtitle="Datos generales una sola vez" />
+      <div className="capture-layout-tabs" aria-label="Modo de captura">
+        <button className={captureLayout === 'asistente' ? 'active' : ''} type="button" onClick={() => setCaptureLayout('asistente')}>
+          <ClipboardCheck size={17} /> Asistente
+        </button>
+        <button className={captureLayout === 'formulario' ? 'active' : ''} type="button" onClick={() => setCaptureLayout('formulario')}>
+          <FileSpreadsheet size={17} /> Formulario completo
+        </button>
+      </div>
       <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
         <ShiftBaseFields base={base} setBase={setBase} />
       </QuickSection>
@@ -1881,22 +1903,64 @@ function TurnoCompletoForm({
         </div>
       </QuickSection>
 
-      {modules.barrenacion && (
-        <section className="turno-module-section">
-          <BarrenacionForm record={barrenacion} setRecord={setBarrenacion} showBaseFields={false} />
-        </section>
-      )}
-      {modules.rezagado && (
-        <section className="turno-module-section">
-          <RezagadoForm record={rezagado} setRecord={setRezagado} showBaseFields={false} />
-        </section>
-      )}
-      {modules.seguridad && (
-        <section className="turno-module-section">
-          <SeguridadForm record={seguridad} setRecord={setSeguridad} showBaseFields={false} />
-        </section>
+      {captureLayout === 'asistente' ? (
+        <QuickSection title="Captura guiada" icon={<Pickaxe size={18} />} anchorId="capture-guiada">
+          <div className="assistant-module-nav">
+            {enabledModules.map((type) => (
+              <button
+                className={activeAssistantModule === type ? 'active' : ''}
+                key={type}
+                type="button"
+                onClick={() => setAssistantModule(type)}
+              >
+                {type === 'barrenacion' && <Drill size={18} />}
+                {type === 'rezagado' && <Truck size={18} />}
+                {type === 'seguridad' && <ShieldCheck size={18} />}
+                {shortTypeLabel(type)}
+              </button>
+            ))}
+          </div>
+          <div className="assistant-progress-grid">
+            <AssistantMetric label="Jumbos" value={barrenacion.jumbo.length} />
+            <AssistantMetric label="Voladuras" value={barrenacion.voladuras.length} />
+            <AssistantMetric label="Scoop" value={rezagado.scoopTram.length} />
+            <AssistantMetric label="Retro" value={rezagado.retro.length} />
+          </div>
+          <section className="turno-module-section assistant-active-module">
+            {activeAssistantModule === 'barrenacion' && <BarrenacionForm record={barrenacion} setRecord={setBarrenacion} showBaseFields={false} />}
+            {activeAssistantModule === 'rezagado' && <RezagadoForm record={rezagado} setRecord={setRezagado} showBaseFields={false} />}
+            {activeAssistantModule === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} showBaseFields={false} />}
+          </section>
+        </QuickSection>
+      ) : (
+        <>
+          {modules.barrenacion && (
+            <section className="turno-module-section">
+              <BarrenacionForm record={barrenacion} setRecord={setBarrenacion} showBaseFields={false} />
+            </section>
+          )}
+          {modules.rezagado && (
+            <section className="turno-module-section">
+              <RezagadoForm record={rezagado} setRecord={setRezagado} showBaseFields={false} />
+            </section>
+          )}
+          {modules.seguridad && (
+            <section className="turno-module-section">
+              <SeguridadForm record={seguridad} setRecord={setSeguridad} showBaseFields={false} />
+            </section>
+          )}
+        </>
       )}
     </div>
+  )
+}
+
+function AssistantMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <article>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
   )
 }
 
@@ -2892,6 +2956,7 @@ function loadCaptureDraft(): CaptureDraft | null {
     const draft = JSON.parse(stored) as CaptureDraft
     const normalized: CaptureDraft = {
       captureMode: isCaptureMode(draft.captureMode) ? draft.captureMode : 'modulo',
+      captureLayout: isCaptureLayout(draft.captureLayout) ? draft.captureLayout : 'asistente',
       formType: isRecordType(draft.formType) ? draft.formType : 'barrenacion',
       turnoBase: normalizeShiftBase(draft.turnoBase),
       turnoModules: normalizeTurnoModules(draft.turnoModules),
@@ -3186,6 +3251,14 @@ function labelType(type: RecordType) {
   return {
     barrenacion: 'Barrenacion y voladuras',
     rezagado: 'Rezagado retro',
+    seguridad: 'Seguridad',
+  }[type]
+}
+
+function shortTypeLabel(type: RecordType) {
+  return {
+    barrenacion: 'Barrenacion',
+    rezagado: 'Rezagado',
     seguridad: 'Seguridad',
   }[type]
 }
@@ -3557,6 +3630,10 @@ function hasRecordDraftData(record: MineRecord) {
 
 function isCaptureMode(value: unknown): value is CaptureMode {
   return value === 'modulo' || value === 'turno'
+}
+
+function isCaptureLayout(value: unknown): value is CaptureLayout {
+  return value === 'asistente' || value === 'formulario'
 }
 
 function isRecordType(value: unknown): value is RecordType {
