@@ -61,6 +61,8 @@ type RecordType = 'barrenacion' | 'rezagado' | 'seguridad'
 type UserRole = 'supervisor' | 'administrador' | 'gerencia'
 type BarrenacionActivity = 'jumbo' | 'maquinaPierna' | 'voladura'
 type RezagadoEquipment = 'scoop' | 'retro'
+type ShiftTemplateId = 'barrenacionNormal' | 'voladura' | 'rezagado' | 'turnoMixto' | 'emergencia'
+type ExpressCaptureMode = 'jumbo' | 'maquinaPierna' | 'voladura' | 'scoop' | 'retro' | 'seguridad'
 type BarrenacionAssistantStep = 'actividad' | 'equipo' | 'produccion' | 'detalles'
 type RezagadoAssistantStep = 'equipo' | 'trabajo' | 'produccion' | 'cierre'
 type HaulActivity = 'rezagado' | 'traspaleo' | 'limpia' | 'balastreo' | 'planilla' | 'relleno'
@@ -271,6 +273,32 @@ type SeguridadRecord = BaseRecord & {
 type MineRecord = BarrenacionRecord | RezagadoRecord | SeguridadRecord
 type ShiftBase = Pick<BaseRecord, 'supervisor' | 'fecha' | 'turno' | 'unidad'>
 type TurnoModules = Record<RecordType, boolean>
+type CaptureTemplateSnapshot = {
+  captureMode: CaptureMode
+  captureLayout: CaptureLayout
+  formType: RecordType
+  turnoBase: ShiftBase
+  turnoModules: TurnoModules
+  barrenacion: BarrenacionRecord
+  rezagado: RezagadoRecord
+  seguridad: SeguridadRecord
+}
+type ShiftTemplate = {
+  id: ShiftTemplateId
+  title: string
+  description: string
+  modules: TurnoModules
+  primaryType: RecordType
+}
+type ExpressCaptureInput = {
+  mode: ExpressCaptureMode
+  equipment: string
+  operador: string
+  nivelObra: string
+  activity: string
+  quantity: number
+  notes: string
+}
 type CaptureDraft = {
   captureMode: CaptureMode
   captureLayout: CaptureLayout
@@ -394,6 +422,53 @@ const defaultTurnoModules: TurnoModules = {
   rezagado: true,
   seguridad: false,
 }
+
+const shiftTemplates: ShiftTemplate[] = [
+  {
+    id: 'barrenacionNormal',
+    title: 'Barrenacion normal',
+    description: 'Jumbo o maquina pierna con produccion por frente.',
+    modules: { barrenacion: true, rezagado: false, seguridad: false },
+    primaryType: 'barrenacion',
+  },
+  {
+    id: 'voladura',
+    title: 'Voladura',
+    description: 'Frente, barrenos pegados, metros e insumos.',
+    modules: { barrenacion: true, rezagado: false, seguridad: false },
+    primaryType: 'barrenacion',
+  },
+  {
+    id: 'rezagado',
+    title: 'Rezagado',
+    description: 'Scoop o retro con actividades multiples.',
+    modules: { barrenacion: false, rezagado: true, seguridad: false },
+    primaryType: 'rezagado',
+  },
+  {
+    id: 'turnoMixto',
+    title: 'Turno mixto',
+    description: 'Barrenacion, rezagado y cierre operativo.',
+    modules: { barrenacion: true, rezagado: true, seguridad: false },
+    primaryType: 'barrenacion',
+  },
+  {
+    id: 'emergencia',
+    title: 'Emergencia / incidente',
+    description: 'Seguridad al frente con evidencia y pase.',
+    modules: { barrenacion: false, rezagado: false, seguridad: true },
+    primaryType: 'seguridad',
+  },
+]
+
+const expressModes: { mode: ExpressCaptureMode; label: string; icon: ReactNode }[] = [
+  { mode: 'jumbo', label: 'Jumbo', icon: <Drill size={17} /> },
+  { mode: 'maquinaPierna', label: 'Pierna', icon: <HardHat size={17} /> },
+  { mode: 'voladura', label: 'Voladura', icon: <Activity size={17} /> },
+  { mode: 'scoop', label: 'Scoop', icon: <Truck size={17} /> },
+  { mode: 'retro', label: 'Retro', icon: <Pickaxe size={17} /> },
+  { mode: 'seguridad', label: 'Seguridad', icon: <ShieldCheck size={17} /> },
+]
 
 const defaultCatalog: CatalogState = {
   jumbo: jumboEquipoOptions,
@@ -571,6 +646,7 @@ function App() {
   const [activeRole, setActiveRole] = useState<UserRole>(loadUserRole)
   const [catalog, setCatalog] = useState<CatalogState>(loadCatalog)
   const [closeTurnoOnSave, setCloseTurnoOnSave] = useState(false)
+  const [templateUndo, setTemplateUndo] = useState<CaptureTemplateSnapshot | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
@@ -821,6 +897,67 @@ function App() {
     setMessage(closeTurno ? `Turno cerrado y guardado con ${selectedRecords.length} registro(s).` : `Turno completo guardado en historial local con ${selectedRecords.length} registro(s).`)
   }
 
+  function applyShiftTemplate(templateId: ShiftTemplateId) {
+    const template = shiftTemplates.find((item) => item.id === templateId)
+    if (!template || editingId) return
+    setTemplateUndo({
+      captureMode,
+      captureLayout,
+      formType,
+      turnoBase,
+      turnoModules,
+      barrenacion,
+      rezagado,
+      seguridad,
+    })
+    const base = captureMode === 'turno'
+      ? turnoBase
+      : { ...baseDefaults, fecha: new Date().toISOString().slice(0, 10) }
+    const nextBarrenacion = { ...makeBarrenacion(), ...base }
+    const nextRezagado = { ...makeRezagado(), ...base }
+    const nextSeguridad = { ...makeSeguridad(), ...base }
+
+    if (templateId === 'voladura') {
+      nextBarrenacion.activeActivity = 'voladura'
+      nextBarrenacion.jumbo = []
+      nextBarrenacion.maquinaPierna = []
+      nextBarrenacion.voladuras = [emptyBlastRow()]
+    }
+    if (templateId === 'rezagado') {
+      nextRezagado.activeEquipment = 'scoop'
+      nextRezagado.scoopTram = [emptyHaulRow(defaultScoop)]
+      nextRezagado.retro = []
+    }
+    if (templateId === 'emergencia') {
+      nextSeguridad.observaciones = 'Atencion prioritaria en turno.'
+    }
+
+    setCaptureMode('turno')
+    setCaptureLayout('asistente')
+    setFormType(template.primaryType)
+    setTurnoBase(base)
+    setTurnoModules({ ...template.modules })
+    setBarrenacion(nextBarrenacion)
+    setRezagado(nextRezagado)
+    setSeguridad(nextSeguridad)
+    setSection('captura')
+    setMessage(`Plantilla aplicada: ${template.title}.`)
+  }
+
+  function undoShiftTemplate() {
+    if (!templateUndo) return
+    setCaptureMode(templateUndo.captureMode)
+    setCaptureLayout(templateUndo.captureLayout)
+    setFormType(templateUndo.formType)
+    setTurnoBase(templateUndo.turnoBase)
+    setTurnoModules(templateUndo.turnoModules)
+    setBarrenacion(templateUndo.barrenacion)
+    setRezagado(templateUndo.rezagado)
+    setSeguridad(templateUndo.seguridad)
+    setTemplateUndo(null)
+    setMessage('Plantilla revertida. Se recupero el estado anterior.')
+  }
+
   function resetForm(type: RecordType) {
     if (type === 'barrenacion') setBarrenacion(makeBarrenacion())
     if (type === 'rezagado') setRezagado(makeRezagado())
@@ -833,6 +970,7 @@ function App() {
     setBarrenacion(makeBarrenacion())
     setRezagado(makeRezagado())
     setSeguridad(makeSeguridad())
+    setTemplateUndo(null)
   }
 
   function startEdit(record: MineRecord) {
@@ -1362,6 +1500,7 @@ function App() {
               <span>Sincronizacion manual</span>
               <strong>{syncing ? 'Sincronizando' : pendingSync > 0 ? `${pendingSync} por enviar` : 'Historial local al dia'}</strong>
             </div>
+            <CaptureReadinessCard review={captureReview} />
             <div className="record-tabs">
               <button
                 type="button"
@@ -1471,10 +1610,13 @@ function App() {
                 equipmentFavorites={equipmentFavorites}
                 equipmentOptions={equipmentOptions}
                 modules={turnoModules}
+                canUndoTemplate={Boolean(templateUndo)}
                 onCloseTurno={() => {
                   setCloseTurnoOnSave(true)
                   setReviewOpen(true)
                 }}
+                onApplyTemplate={applyShiftTemplate}
+                onUndoTemplate={undoShiftTemplate}
                 rezagado={rezagado}
                 seguridad={seguridad}
                 setBarrenacion={setBarrenacion}
@@ -1821,6 +1963,34 @@ function SaveReviewModal({
         </div>
       </section>
     </>
+  )
+}
+
+function CaptureReadinessCard({ review }: { review: CaptureReview }) {
+  const completion = review.insights.length
+    ? Math.round(review.insights.reduce((total, item) => total + item.completion, 0) / review.insights.length)
+    : 0
+  const status: ReviewInsightStatus = review.errors.length
+    ? 'critical'
+    : completion >= 85 && review.warnings.length === 0
+    ? 'ready'
+    : 'warning'
+  const title = status === 'ready' ? 'Listo para guardar' : status === 'critical' ? 'Bloqueado' : 'Revisar cierre'
+  const detail = review.errors[0]
+    ?? review.insights.find((item) => item.pending.length > 0)?.pending.slice(0, 2).join(', ')
+    ?? review.warnings[0]
+    ?? 'Datos principales completos.'
+
+  return (
+    <div className={`capture-readiness ${status}`}>
+      <div>
+        {status === 'ready' ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+        <span>Semaforo</span>
+      </div>
+      <strong>{title}</strong>
+      <progress value={completion} max={100} />
+      <small>{completion}% - {detail}</small>
+    </div>
   )
 }
 
@@ -2288,7 +2458,10 @@ function TurnoCompletoForm({
   equipmentFavorites,
   equipmentOptions,
   modules,
+  canUndoTemplate,
+  onApplyTemplate,
   onCloseTurno,
+  onUndoTemplate,
   rezagado,
   seguridad,
   setBarrenacion,
@@ -2305,7 +2478,10 @@ function TurnoCompletoForm({
   equipmentFavorites: EquipmentFavorites
   equipmentOptions: EquipmentOptions
   modules: TurnoModules
+  canUndoTemplate: boolean
+  onApplyTemplate: (templateId: ShiftTemplateId) => void
   onCloseTurno: () => void
+  onUndoTemplate: () => void
   rezagado: RezagadoRecord
   seguridad: SeguridadRecord
   setBarrenacion: (record: BarrenacionRecord) => void
@@ -2326,6 +2502,101 @@ function TurnoCompletoForm({
     setModules(next)
   }
 
+  function applyExpressCapture(input: ExpressCaptureInput) {
+    const notes = input.notes.trim()
+    const quantity = Number(input.quantity || 0)
+
+    if (input.mode === 'jumbo' || input.mode === 'maquinaPierna') {
+      const equipment = input.equipment.trim() || defaultJumbo
+      const row: DrillRow = {
+        ...emptyDrillRow(resolveScannedEquipment(equipment, equipmentOptions.jumbo)),
+        operador: input.operador.trim(),
+        nivelObra: input.nivelObra.trim(),
+        metrosDados: quantity,
+      }
+      const key = input.mode === 'maquinaPierna' ? 'maquinaPierna' : 'jumbo'
+      const currentRows = key === 'jumbo' ? barrenacion.jumbo : barrenacion.maquinaPierna
+      setBarrenacion({
+        ...barrenacion,
+        activeActivity: key,
+        comentarios: mergeNotes(barrenacion.comentarios, notes),
+        jumbo: key === 'jumbo' ? appendExpressRow(currentRows, row, hasDrillData) : barrenacion.jumbo,
+        maquinaPierna: key === 'maquinaPierna' ? appendExpressRow(currentRows, row, hasDrillData) : barrenacion.maquinaPierna,
+      })
+      setModules({ ...modules, barrenacion: true })
+      setAssistantModule('barrenacion')
+      return
+    }
+
+    if (input.mode === 'voladura') {
+      const row: BlastRow = {
+        ...emptyBlastRow(),
+        obra: input.equipment.trim() || input.nivelObra.trim(),
+        oficial: input.operador.trim(),
+        metrosPegados: quantity,
+        observaciones: notes,
+      }
+      setBarrenacion({
+        ...barrenacion,
+        activeActivity: 'voladura',
+        voladuras: appendExpressRow(barrenacion.voladuras, row, hasBlastData),
+      })
+      setModules({ ...modules, barrenacion: true })
+      setAssistantModule('barrenacion')
+      return
+    }
+
+    if (input.mode === 'scoop') {
+      const activity = isHaulActivity(input.activity) ? input.activity : 'rezagado'
+      const row: HaulRow = {
+        ...emptyHaulRow(resolveScannedEquipment(input.equipment.trim() || defaultScoop, equipmentOptions.scoop)),
+        selectedActivities: [activity],
+        operador: input.operador.trim(),
+        nivelObra: input.nivelObra.trim(),
+        [activity]: quantity,
+        camiones: activity === 'rezagado' ? quantity : 0,
+        observaciones: notes,
+      }
+      setRezagado({
+        ...rezagado,
+        activeEquipment: 'scoop',
+        scoopTram: appendExpressRow(rezagado.scoopTram, row, hasHaulData),
+      })
+      setModules({ ...modules, rezagado: true })
+      setAssistantModule('rezagado')
+      return
+    }
+
+    if (input.mode === 'retro') {
+      const activity = isRetroActivity(input.activity) ? input.activity : 'amacice'
+      const row: RetroRow = {
+        ...emptyRetroRow(),
+        selectedActivities: [activity],
+        equipo: resolveScannedEquipment(input.equipment.trim() || defaultRetro, equipmentOptions.retro),
+        operador: input.operador.trim(),
+        nivelObra: input.nivelObra.trim(),
+        [activity]: quantity,
+        observaciones: notes,
+      }
+      setRezagado({
+        ...rezagado,
+        activeEquipment: 'retro',
+        retro: appendExpressRow(rezagado.retro, row, hasRetroData),
+      })
+      setModules({ ...modules, rezagado: true })
+      setAssistantModule('rezagado')
+      return
+    }
+
+    setSeguridad({
+      ...seguridad,
+      fuerzaLaboral: quantity || seguridad.fuerzaLaboral,
+      observaciones: mergeNotes(seguridad.observaciones, [input.nivelObra, input.operador, notes].filter(Boolean).join(' | ')),
+    })
+    setModules({ ...modules, seguridad: true })
+    setAssistantModule('seguridad')
+  }
+
   return (
     <div className="turno-completo">
       <PanelTitle title="Turno completo" subtitle="Datos generales una sola vez" />
@@ -2337,6 +2608,29 @@ function TurnoCompletoForm({
           <FileSpreadsheet size={17} /> Formulario completo
         </button>
       </div>
+      <QuickSection title="Plantillas" icon={<Flag size={18} />} anchorId="capture-plantillas">
+        <div className="template-grid">
+          {shiftTemplates.map((template) => (
+            <button
+              className={`template-card ${template.modules.barrenacion ? 'has-barrenacion' : ''} ${template.modules.rezagado ? 'has-rezagado' : ''} ${template.modules.seguridad ? 'has-seguridad' : ''}`}
+              key={template.id}
+              type="button"
+              onClick={() => onApplyTemplate(template.id)}
+            >
+              <strong>{template.title}</strong>
+              <span>{template.description}</span>
+            </button>
+          ))}
+        </div>
+        {canUndoTemplate && (
+          <button className="inline-action undo-template-action" type="button" onClick={onUndoTemplate}>
+            <RefreshCw size={16} /> Deshacer plantilla
+          </button>
+        )}
+      </QuickSection>
+      <QuickSection title="Captura express" icon={<Gauge size={18} />} anchorId="capture-express">
+        <ExpressCapturePanel equipmentOptions={equipmentOptions} onApply={applyExpressCapture} />
+      </QuickSection>
       <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
         <ShiftBaseFields base={base} setBase={setBase} />
       </QuickSection>
@@ -2427,6 +2721,102 @@ function AssistantMetric({ label, value }: { label: string; value: number }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </article>
+  )
+}
+
+function ExpressCapturePanel({
+  equipmentOptions,
+  onApply,
+}: {
+  equipmentOptions: EquipmentOptions
+  onApply: (input: ExpressCaptureInput) => void
+}) {
+  const [mode, setMode] = useState<ExpressCaptureMode>('jumbo')
+  const [equipment, setEquipment] = useState('')
+  const [operador, setOperador] = useState('')
+  const [nivelObra, setNivelObra] = useState('')
+  const [activity, setActivity] = useState<string>('rezagado')
+  const [quantity, setQuantity] = useState(0)
+  const [notes, setNotes] = useState('')
+  const [message, setMessage] = useState('')
+  const equipmentList = mode === 'scoop' ? equipmentOptions.scoop : mode === 'retro' ? equipmentOptions.retro : mode === 'voladura' || mode === 'seguridad' ? undefined : equipmentOptions.jumbo
+  const activityOptions = mode === 'scoop'
+    ? haulActivityKeys.map((key) => ({ value: key, label: haulActivityLabels[key] }))
+    : mode === 'retro'
+    ? retroActivityKeys.map((key) => ({ value: key, label: retroActivityLabels[key] }))
+    : []
+  const quantityLabel = mode === 'voladura'
+    ? 'Metros pegados'
+    : mode === 'scoop'
+    ? 'Cantidad / camiones'
+    : mode === 'retro'
+    ? 'Cantidad'
+    : mode === 'seguridad'
+    ? 'Fuerza laboral'
+    : 'Metros dados'
+
+  function changeMode(nextMode: ExpressCaptureMode) {
+    setMode(nextMode)
+    setActivity(defaultExpressActivity(nextMode))
+    setEquipment('')
+    setQuantity(0)
+    setMessage('')
+  }
+
+  function apply() {
+    const hasData = equipment.trim() || operador.trim() || nivelObra.trim() || notes.trim() || quantity > 0
+    if (!hasData) {
+      setMessage('Captura al menos un dato para agregar al turno.')
+      return
+    }
+    onApply({ mode, equipment, operador, nivelObra, activity, quantity, notes })
+    setQuantity(0)
+    setNotes('')
+    setMessage(`${expressModeLabel(mode)} agregado al turno.`)
+  }
+
+  return (
+    <div className="express-capture-panel">
+      <div className="express-mode-grid" aria-label="Tipo de captura express">
+        {expressModes.map((item) => (
+          <button className={mode === item.mode ? 'active' : ''} key={item.mode} type="button" onClick={() => changeMode(item.mode)}>
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="form-grid quick">
+        <label>
+          {mode === 'voladura' ? 'Frente / obra' : mode === 'seguridad' ? 'Area / condicion' : 'Equipo'}
+          {equipmentList ? (
+            <select className="scroll-select" value={equipment} onChange={(event) => setEquipment(event.target.value)}>
+              <option value="">Seleccionar</option>
+              {equipmentList.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          ) : (
+            <input value={equipment} onChange={(event) => setEquipment(event.target.value)} />
+          )}
+        </label>
+        <Field label={mode === 'seguridad' ? 'Reporta' : 'Operador'} value={operador} onChange={setOperador} />
+        <Field label="Nivel / obra" value={nivelObra} onChange={setNivelObra} />
+        {activityOptions.length > 0 && (
+          <label>
+            Trabajo
+            <select value={activity} onChange={(event) => setActivity(event.target.value)}>
+              {activityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+        )}
+        <Field label={quantityLabel} type="number" value={quantity} onChange={(value) => setQuantity(Number(value))} />
+      </div>
+      <div className="express-notes-row">
+        <TextArea label="Nota rapida" value={notes} onChange={setNotes} />
+        <button className="primary-action" type="button" onClick={apply}>
+          <Plus size={18} /> Agregar express
+        </button>
+      </div>
+      {message && <small>{message}</small>}
+    </div>
   )
 }
 
@@ -5546,6 +5936,23 @@ function shortBarrenacionActivityLabel(type: BarrenacionActivity) {
   }[type]
 }
 
+function expressModeLabel(type: ExpressCaptureMode) {
+  return {
+    jumbo: 'Jumbo',
+    maquinaPierna: 'Maquina pierna',
+    voladura: 'Voladura',
+    scoop: 'Scoop',
+    retro: 'Retro',
+    seguridad: 'Seguridad',
+  }[type]
+}
+
+function defaultExpressActivity(type: ExpressCaptureMode) {
+  if (type === 'retro') return 'amacice'
+  if (type === 'scoop') return 'rezagado'
+  return ''
+}
+
 function labelChatType(type: ChatMessageType) {
   return {
     aviso: 'Aviso',
@@ -5829,6 +6236,11 @@ function hasRetroData(row: RetroRow) {
       || row.mtAcequia
       || row.diesel,
   )
+}
+
+function appendExpressRow<T>(rows: T[], row: T, hasData: (row: T) => boolean) {
+  const filledRows = rows.filter(hasData)
+  return [...filledRows, row]
 }
 
 function getBarrenacionActivity(record: BarrenacionRecord): BarrenacionActivity {
