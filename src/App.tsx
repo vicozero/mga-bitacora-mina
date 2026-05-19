@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, FormEvent, ReactNode } from 'react'
+import type { ChangeEvent, FormEvent, PointerEvent, ReactNode } from 'react'
 import {
   Accessibility,
   Activity,
   BarChart3,
   Bell,
+  Camera,
   ClipboardCheck,
   Drill,
   Edit3,
@@ -14,6 +15,8 @@ import {
   History,
   Home,
   LayoutDashboard,
+  Lock,
+  MapPin,
   Menu,
   MessageSquare,
   MoreVertical,
@@ -23,10 +26,12 @@ import {
   RefreshCw,
   Save,
   Send,
+  Settings,
   ShieldCheck,
   Trash2,
   Truck,
   Upload,
+  UserRound,
   X,
 } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
@@ -43,10 +48,11 @@ import {
 import './App.css'
 
 type Shift = '1' | '2'
-type AppSection = 'home' | 'captura' | 'historial' | 'dashboard'
+type AppSection = 'home' | 'captura' | 'historial' | 'dashboard' | 'catalogo'
 type CaptureMode = 'modulo' | 'turno'
 type CaptureLayout = 'asistente' | 'formulario'
 type RecordType = 'barrenacion' | 'rezagado' | 'seguridad'
+type UserRole = 'supervisor' | 'administrador' | 'gerencia'
 type BarrenacionActivity = 'jumbo' | 'maquinaPierna' | 'voladura'
 type RezagadoEquipment = 'scoop' | 'retro'
 type BarrenacionAssistantStep = 'actividad' | 'equipo' | 'produccion' | 'detalles'
@@ -130,6 +136,20 @@ type RetroRow = {
   observaciones: string
 }
 
+type EvidencePhoto = {
+  id: string
+  dataUrl: string
+  caption: string
+  createdAt: string
+}
+
+type LocationSnapshot = {
+  latitude: number
+  longitude: number
+  accuracy?: number
+  capturedAt: string
+}
+
 type BaseRecord = {
   id: string
   type: RecordType
@@ -141,6 +161,12 @@ type BaseRecord = {
   updatedAt: string
   deletedAt?: string
   syncedAt?: string
+  role?: UserRole
+  evidencias?: EvidencePhoto[]
+  signatureDataUrl?: string
+  location?: LocationSnapshot
+  closedAt?: string
+  closedBy?: string
 }
 
 type BarrenacionRecord = BaseRecord & {
@@ -210,6 +236,26 @@ type EquipmentFavorites = {
   scoop: string[]
   retro: string[]
 }
+type CatalogState = {
+  jumbo: string[]
+  scoop: string[]
+  retro: string[]
+  operadores: string[]
+  niveles: string[]
+}
+type EquipmentOptions = Pick<CatalogState, 'jumbo' | 'scoop' | 'retro'>
+
+type EquipmentSummary = {
+  equipo: string
+  tipo: string
+  registros: number
+  metrosDados: number
+  metrosPegados: number
+  rezagado: number
+  camiones: number
+  diesel: number
+  horas: number
+}
 
 type ChatMessage = {
   id: string
@@ -227,6 +273,8 @@ const MESSAGE_STORAGE_KEY = 'mga-bitacora-messages-v1'
 const API_URL_KEY = 'mga-bitacora-api-url'
 const WHATSAPP_NUMBER_KEY = 'mga-bitacora-whatsapp-number'
 const OPERATOR_MODE_KEY = 'mga-bitacora-operator-mode'
+const ROLE_KEY = 'mga-bitacora-role'
+const CATALOG_KEY = 'mga-bitacora-catalog-v1'
 const DEFAULT_API_URL = 'https://mga-bitacora-mina.onrender.com'
 const BARRENACION_TEMPLATE = '/templates/barrenacion-voladuras.pdf'
 const REZAGADO_TEMPLATE = '/templates/rezagado.pdf'
@@ -245,6 +293,14 @@ const defaultTurnoModules: TurnoModules = {
   barrenacion: true,
   rezagado: true,
   seguridad: false,
+}
+
+const defaultCatalog: CatalogState = {
+  jumbo: jumboEquipoOptions,
+  scoop: scoopEquipoOptions,
+  retro: retroEquipoOptions,
+  operadores: [],
+  niveles: [],
 }
 
 const nowIso = () => new Date().toISOString()
@@ -412,6 +468,9 @@ function App() {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [apiUrl, setApiUrl] = useState(loadApiUrl)
   const [operatorMode, setOperatorMode] = useState(loadOperatorMode)
+  const [activeRole, setActiveRole] = useState<UserRole>(loadUserRole)
+  const [catalog, setCatalog] = useState<CatalogState>(loadCatalog)
+  const [closeTurnoOnSave, setCloseTurnoOnSave] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
@@ -451,6 +510,13 @@ function App() {
   const pendingTotal = pendingSync + pendingMessages
   const latestMessages = useMemo(() => chatMessages.slice(0, 8), [chatMessages])
   const equipmentFavorites = useMemo(() => buildEquipmentFavorites(visibleRecords), [visibleRecords])
+  const equipmentOptions = useMemo(() => ({
+    jumbo: mergeCatalogList(catalog.jumbo, jumboEquipoOptions),
+    scoop: mergeCatalogList(catalog.scoop, scoopEquipoOptions),
+    retro: mergeCatalogList(catalog.retro, retroEquipoOptions),
+  }), [catalog])
+  const equipmentSummary = useMemo(() => buildEquipmentSummary(filtered), [filtered])
+  const hasTurnoDraft = captureMode === 'turno' && hasTurnoDraftContent(turnoBase, turnoModules, barrenacion, rezagado, seguridad)
   const captureReview = useMemo(
     () => buildCaptureReview(captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId),
     [captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId],
@@ -467,6 +533,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem(OPERATOR_MODE_KEY, operatorMode ? '1' : '0')
   }, [operatorMode])
+
+  useEffect(() => {
+    localStorage.setItem(ROLE_KEY, activeRole)
+  }, [activeRole])
+
+  useEffect(() => {
+    localStorage.setItem(CATALOG_KEY, JSON.stringify(catalog))
+  }, [catalog])
 
   useEffect(() => {
     const draft: CaptureDraft = {
@@ -495,6 +569,7 @@ function App() {
         setActionsOpen(false)
         setChatPanelOpen(false)
         setReviewOpen(false)
+        setCloseTurnoOnSave(false)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -593,6 +668,7 @@ function App() {
 
   function saveRecord(event: FormEvent) {
     event.preventDefault()
+    setCloseTurnoOnSave(false)
     setReviewOpen(true)
   }
 
@@ -600,10 +676,12 @@ function App() {
     if (captureReview.errors.length > 0) return
     setReviewOpen(false)
     if (captureMode === 'turno' && !editingId) {
-      saveTurnoCompleto()
+      saveTurnoCompleto(closeTurnoOnSave)
+      setCloseTurnoOnSave(false)
       return
     }
     saveModuloRecord()
+    setCloseTurnoOnSave(false)
   }
 
   function saveModuloRecord() {
@@ -611,6 +689,7 @@ function App() {
       formType === 'barrenacion' ? barrenacion : formType === 'rezagado' ? rezagado : seguridad
     const updated = normalizeRecord({
       ...source,
+      role: activeRole,
       updatedAt: nowIso(),
       deletedAt: undefined,
       syncedAt: undefined,
@@ -624,12 +703,12 @@ function App() {
     setMessage(editingId ? 'Captura actualizada en el historial local.' : 'Registro guardado en el historial local de este dispositivo.')
   }
 
-  function saveTurnoCompleto() {
+  function saveTurnoCompleto(closeTurno = false) {
     const selectedRecords: MineRecord[] = []
     const updatedAt = nowIso()
-    if (turnoModules.barrenacion) selectedRecords.push(applyShiftBase(barrenacion, turnoBase, updatedAt))
-    if (turnoModules.rezagado) selectedRecords.push(applyShiftBase(rezagado, turnoBase, updatedAt))
-    if (turnoModules.seguridad) selectedRecords.push(applyShiftBase(seguridad, turnoBase, updatedAt))
+    if (turnoModules.barrenacion) selectedRecords.push(applyShiftBase(barrenacion, turnoBase, updatedAt, activeRole, closeTurno))
+    if (turnoModules.rezagado) selectedRecords.push(applyShiftBase(rezagado, turnoBase, updatedAt, activeRole, closeTurno))
+    if (turnoModules.seguridad) selectedRecords.push(applyShiftBase(seguridad, turnoBase, updatedAt, activeRole, closeTurno))
     if (selectedRecords.length === 0) {
       setMessage('Selecciona al menos un modulo del turno antes de guardar.')
       return
@@ -638,7 +717,7 @@ function App() {
     resetTurnoCompleto()
     setCaptureMode('modulo')
     setSection('historial')
-    setMessage(`Turno completo guardado en historial local con ${selectedRecords.length} registro(s).`)
+    setMessage(closeTurno ? `Turno cerrado y guardado con ${selectedRecords.length} registro(s).` : `Turno completo guardado en historial local con ${selectedRecords.length} registro(s).`)
   }
 
   function resetForm(type: RecordType) {
@@ -703,6 +782,11 @@ function App() {
     closeMenus()
   }
 
+  function goToCatalog() {
+    setSection('catalogo')
+    closeMenus()
+  }
+
   function openCapture(type: RecordType) {
     selectFormType(type)
     setCaptureMode('modulo')
@@ -721,6 +805,15 @@ function App() {
     setSection('captura')
     closeMenus()
     setMessage('Turno completo listo. Captura los datos generales una sola vez.')
+  }
+
+  function continueTurno() {
+    setCaptureMode('turno')
+    setCaptureLayout('asistente')
+    setEditingId(null)
+    setSection('captura')
+    closeMenus()
+    setMessage('Turno en curso recuperado. Puedes seguir agregando equipos.')
   }
 
   function goToDashboard() {
@@ -816,6 +909,36 @@ function App() {
     pdf.save(`reporte-kpi-mga-${today}.pdf`)
   }
 
+  function exportDailyReport() {
+    const dailyRecords = visibleRecords.filter((record) => record.fecha === today)
+    const dailyKpis = computeKpis(dailyRecords)
+    const pdf = new jsPDF('p', 'mm', 'a4')
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(16)
+    pdf.text('MGA CONTRATISTA MINERA S.A. DE C.V.', 16, 18)
+    pdf.setFontSize(13)
+    pdf.text(`Reporte diario de operaciones mina - ${today}`, 16, 28)
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(10)
+    pdf.text(`Registros: ${dailyRecords.length}`, 16, 42)
+    pdf.text(`Metros barrenados: ${dailyKpis.metrosDados}`, 16, 50)
+    pdf.text(`Metros pegados: ${dailyKpis.metrosPegados}`, 16, 58)
+    pdf.text(`Cucharones rezagado: ${dailyKpis.rezagado}`, 16, 66)
+    pdf.text(`Camiones: ${dailyKpis.camiones}`, 16, 74)
+    pdf.text(`Diesel: ${dailyKpis.diesel}`, 16, 82)
+    pdf.text(`Accidentes / incidentes: ${dailyKpis.accidentes} / ${dailyKpis.incidentes}`, 16, 90)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('Registros del dia', 16, 106)
+    pdf.setFont('helvetica', 'normal')
+    let top = 116
+    dailyRecords.slice(0, 22).forEach((record) => {
+      pdf.text(`${record.fecha} T${record.turno} | ${labelType(record.type)} | ${record.supervisor || 'Supervisor pendiente'} | ${record.closedAt ? 'Cerrado' : 'Abierto'}`, 16, top)
+      top += 8
+    })
+    if (dailyRecords.length === 0) pdf.text('No hay registros locales para la fecha de hoy.', 16, top)
+    pdf.save(`reporte-diario-mga-${today}.pdf`)
+  }
+
   async function exportRecordPdf(record: MineRecord) {
     if (record.type === 'seguridad') {
       setMessage('El formato PDF adjunto aplica a barrenacion/voladuras y rezagado.')
@@ -852,7 +975,7 @@ function App() {
   }
 
   return (
-    <main className={`app-shell ${operatorMode ? 'operator-mode' : ''} ${section === 'captura' ? 'capture-mode' : section === 'dashboard' || section === 'historial' ? 'review-mode' : 'home-mode'}`}>
+    <main className={`app-shell ${operatorMode ? 'operator-mode' : ''} ${section === 'captura' ? 'capture-mode' : section === 'dashboard' || section === 'historial' || section === 'catalogo' ? 'review-mode' : 'home-mode'}`}>
       <header className="topbar">
         <button
           className="chrome-icon"
@@ -906,6 +1029,14 @@ function App() {
           <Accessibility size={18} />
           <span>Operador</span>
         </button>
+        <label className="role-select" aria-label="Rol de usuario">
+          <UserRound size={17} />
+          <select value={activeRole} onChange={(event) => setActiveRole(event.target.value as UserRole)}>
+            <option value="supervisor">Supervisor</option>
+            <option value="administrador">Administrador</option>
+            <option value="gerencia">Gerencia</option>
+          </select>
+        </label>
         <button
           className="chrome-icon"
           aria-expanded={actionsOpen}
@@ -951,6 +1082,18 @@ function App() {
             <span>Historial local</span>
             <small>Bitacora guardada en el equipo</small>
           </button>
+          <button className={section === 'catalogo' ? 'active' : ''} type="button" onClick={goToCatalog}>
+            <Settings size={20} />
+            <span>Catalogo editable</span>
+            <small>Equipos, operadores y obras</small>
+          </button>
+          {hasTurnoDraft && (
+            <button type="button" onClick={continueTurno}>
+              <ClipboardCheck size={20} />
+              <span>Continuar turno</span>
+              <small>Borrador activo</small>
+            </button>
+          )}
           {!isApk && (
             <button className={section === 'dashboard' ? 'active' : ''} type="button" onClick={goToDashboard}>
               <LayoutDashboard size={20} />
@@ -997,6 +1140,14 @@ function App() {
           </button>
           <button type="button" onClick={startTurnoCompleto}>
             <Mountain size={18} /> Turno completo
+          </button>
+          {hasTurnoDraft && (
+            <button type="button" onClick={continueTurno}>
+              <ClipboardCheck size={18} /> Continuar turno
+            </button>
+          )}
+          <button type="button" onClick={goToCatalog}>
+            <Settings size={18} /> Catalogo
           </button>
           <button type="button" onClick={toggleOperatorMode}>
             <Accessibility size={18} /> {operatorMode ? 'Modo normal' : 'Modo operador'}
@@ -1058,19 +1209,26 @@ function App() {
       )}
       {reviewOpen && (
         <SaveReviewModal
+          confirmLabel={closeTurnoOnSave ? 'Cerrar turno' : 'Guardar local'}
           review={captureReview}
-          onCancel={() => setReviewOpen(false)}
+          onCancel={() => {
+            setReviewOpen(false)
+            setCloseTurnoOnSave(false)
+          }}
           onConfirm={commitReviewedSave}
         />
       )}
 
       {section === 'home' ? (
         <HomeScreen
+          hasTurnoDraft={hasTurnoDraft}
           pendingMessages={pendingMessages}
           pendingSync={pendingTotal}
           recordCounts={recordCounts}
           showDashboard={!isApk}
           syncing={syncing}
+          onCatalog={goToCatalog}
+          onContinueTurno={continueTurno}
           onDashboard={goToDashboard}
           onHistory={goToHistory}
           onMessages={() => setChatPanelOpen(true)}
@@ -1156,6 +1314,18 @@ function App() {
             <button className="primary-action" type="submit">
               <Save size={18} /> {editingId ? 'Guardar cambios' : 'Guardar registro'}
             </button>
+            {captureMode === 'turno' && !editingId && (
+              <button
+                className="secondary-action close-turno-action"
+                type="button"
+                onClick={() => {
+                  setCloseTurnoOnSave(true)
+                  setReviewOpen(true)
+                }}
+              >
+                <Lock size={18} /> Cerrar turno
+              </button>
+            )}
             {editingId && (
               <button className="secondary-action" type="button" onClick={cancelEdit}>
                 <X size={18} /> Cancelar edicion
@@ -1190,8 +1360,14 @@ function App() {
                 barrenacion={barrenacion}
                 base={turnoBase}
                 captureLayout={captureLayout}
+                catalog={catalog}
                 equipmentFavorites={equipmentFavorites}
+                equipmentOptions={equipmentOptions}
                 modules={turnoModules}
+                onCloseTurno={() => {
+                  setCloseTurnoOnSave(true)
+                  setReviewOpen(true)
+                }}
                 rezagado={rezagado}
                 seguridad={seguridad}
                 setBarrenacion={setBarrenacion}
@@ -1205,9 +1381,9 @@ function App() {
               <>
                 <CaptureFlowNav formType={formType} />
                 {formType === 'barrenacion' && (
-                  <BarrenacionForm record={barrenacion} setRecord={setBarrenacion} />
+                  <BarrenacionForm catalog={catalog} equipmentOptions={equipmentOptions} record={barrenacion} setRecord={setBarrenacion} />
                 )}
-                {formType === 'rezagado' && <RezagadoForm record={rezagado} setRecord={setRezagado} />}
+                {formType === 'rezagado' && <RezagadoForm catalog={catalog} equipmentOptions={equipmentOptions} record={rezagado} setRecord={setRezagado} />}
                 {formType === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} />}
               </>
             )}
@@ -1229,6 +1405,8 @@ function App() {
           onQueryChange={setQuery}
           onSync={() => void syncAll()}
         />
+      ) : section === 'catalogo' ? (
+        <CatalogScreen catalog={catalog} setCatalog={setCatalog} />
       ) : (
         <section className="dashboard">
           <div className="dashboard-tools">
@@ -1254,6 +1432,9 @@ function App() {
               </button>
               <button onClick={exportPdf}>
                 <FileDown size={18} /> PDF KPI
+              </button>
+              <button onClick={exportDailyReport}>
+                <FileDown size={18} /> PDF diario
               </button>
             </div>
           </div>
@@ -1310,6 +1491,8 @@ function App() {
                 <Metric label="Personas registradas" value={kpis.fuerzaLaboral} />
               </section>
             </div>
+
+            <EquipmentDashboard rows={equipmentSummary} />
 
             <div className="records-table">
               <h2>Registros capturados</h2>
@@ -1435,10 +1618,12 @@ function App() {
 }
 
 function SaveReviewModal({
+  confirmLabel,
   review,
   onCancel,
   onConfirm,
 }: {
+  confirmLabel?: string
   review: CaptureReview
   onCancel: () => void
   onConfirm: () => void
@@ -1509,7 +1694,7 @@ function SaveReviewModal({
             Seguir editando
           </button>
           <button className="primary-action" type="button" onClick={onConfirm} disabled={!canSave}>
-            <Save size={18} /> Guardar local
+            <Save size={18} /> {confirmLabel ?? 'Guardar local'}
           </button>
         </div>
       </section>
@@ -1518,11 +1703,14 @@ function SaveReviewModal({
 }
 
 function HomeScreen({
+  hasTurnoDraft,
   pendingMessages,
   pendingSync,
   recordCounts,
   showDashboard,
   syncing,
+  onCatalog,
+  onContinueTurno,
   onDashboard,
   onHistory,
   onMessages,
@@ -1531,11 +1719,14 @@ function HomeScreen({
   onSync,
   onTurnoCompleto,
 }: {
+  hasTurnoDraft: boolean
   pendingMessages: number
   pendingSync: number
   recordCounts: { barrenacion: number; rezagado: number; seguridad: number; total: number }
   showDashboard: boolean
   syncing: boolean
+  onCatalog: () => void
+  onContinueTurno: () => void
   onDashboard: () => void
   onHistory: () => void
   onMessages: () => void
@@ -1556,6 +1747,13 @@ function HomeScreen({
       </div>
 
       <div className="module-launch-grid" aria-label="Modulos principales">
+        {hasTurnoDraft && (
+          <button className="launch-card launch-green" type="button" onClick={onContinueTurno}>
+            <span><ClipboardCheck size={30} /></span>
+            <strong>Continuar turno</strong>
+            <small>Borrador activo</small>
+          </button>
+        )}
         <button className="launch-card launch-slate" type="button" onClick={onTurnoCompleto}>
           <span><Mountain size={30} /></span>
           <strong>Turno completo</strong>
@@ -1602,6 +1800,11 @@ function HomeScreen({
           <span><Edit3 size={30} /></span>
           <strong>Nueva</strong>
           <small>Limpiar captura</small>
+        </button>
+        <button className="launch-card launch-amber" type="button" onClick={onCatalog}>
+          <span><Settings size={30} /></span>
+          <strong>Catalogo</strong>
+          <small>Equipos y operadores</small>
         </button>
         {showDashboard && (
           <button className="launch-card launch-green" type="button" onClick={onDashboard}>
@@ -1701,6 +1904,11 @@ function HistoryScreen({
                 <span>{labelType(record.type)}</span>
                 <strong>{record.fecha} - Turno {record.turno}</strong>
                 <small>{record.supervisor || 'Supervisor pendiente'} - {record.unidad}</small>
+                <small>
+                  {record.closedAt ? `Cerrado ${formatDateTime(record.closedAt)}` : 'Abierto'}
+                  {record.role ? ` - ${roleLabel(record.role)}` : ''}
+                  {record.evidencias?.length ? ` - ${record.evidencias.length} evidencia(s)` : ''}
+                </small>
               </div>
               <span className={record.updatedAt === record.syncedAt ? 'status-pill synced' : 'status-pill'}>
                 {record.updatedAt === record.syncedAt ? 'En red' : 'Local'}
@@ -1728,6 +1936,79 @@ function HistoryScreen({
         )}
       </div>
     </section>
+  )
+}
+
+function CatalogScreen({ catalog, setCatalog }: { catalog: CatalogState; setCatalog: (catalog: CatalogState) => void }) {
+  function addItem(key: keyof CatalogState, value: string) {
+    const clean = value.trim()
+    if (!clean) return
+    setCatalog({ ...catalog, [key]: mergeCatalogList([...catalog[key], clean], []) })
+  }
+
+  function removeItem(key: keyof CatalogState, value: string) {
+    setCatalog({ ...catalog, [key]: catalog[key].filter((item) => item !== value) })
+  }
+
+  return (
+    <section className="catalog-screen">
+      <div className="history-head">
+        <div>
+          <span>Administracion local</span>
+          <h1>Catalogo editable</h1>
+          <p>Agrega equipos, operadores y niveles/obras para acelerar la captura offline. Se guarda en este dispositivo.</p>
+        </div>
+      </div>
+      <div className="catalog-grid">
+        <CatalogGroup title="Jumbos y maquina pierna" items={catalog.jumbo} placeholder="JL-000 - EQUIPO" onAdd={(value) => addItem('jumbo', value)} onRemove={(value) => removeItem('jumbo', value)} />
+        <CatalogGroup title="Scoop tram" items={catalog.scoop} placeholder="ST-000 - EQUIPO" onAdd={(value) => addItem('scoop', value)} onRemove={(value) => removeItem('scoop', value)} />
+        <CatalogGroup title="Retro" items={catalog.retro} placeholder="RET-000 - EQUIPO" onAdd={(value) => addItem('retro', value)} onRemove={(value) => removeItem('retro', value)} />
+        <CatalogGroup title="Operadores" items={catalog.operadores} placeholder="Nombre operador" onAdd={(value) => addItem('operadores', value)} onRemove={(value) => removeItem('operadores', value)} />
+        <CatalogGroup title="Niveles / obras" items={catalog.niveles} placeholder="Nivel, obra o destino" onAdd={(value) => addItem('niveles', value)} onRemove={(value) => removeItem('niveles', value)} />
+      </div>
+    </section>
+  )
+}
+
+function CatalogGroup({
+  items,
+  onAdd,
+  onRemove,
+  placeholder,
+  title,
+}: {
+  items: string[]
+  onAdd: (value: string) => void
+  onRemove: (value: string) => void
+  placeholder: string
+  title: string
+}) {
+  const [value, setValue] = useState('')
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    onAdd(value)
+    setValue('')
+  }
+
+  return (
+    <article className="catalog-card">
+      <h2>{title}</h2>
+      <form onSubmit={submit}>
+        <input aria-label={`Agregar ${title}`} placeholder={placeholder} value={value} onChange={(event) => setValue(event.target.value)} />
+        <button type="submit"><Plus size={16} /> Agregar</button>
+      </form>
+      <div className="catalog-list">
+        {items.length === 0 ? <p>Sin elementos.</p> : items.map((item) => (
+          <span key={item}>
+            {item}
+            <button type="button" onClick={() => onRemove(item)} aria-label={`Eliminar ${item}`}>
+              <X size={14} />
+            </button>
+          </span>
+        ))}
+      </div>
+    </article>
   )
 }
 
@@ -1879,9 +2160,12 @@ function MessageCenter({
 function TurnoCompletoForm({
   barrenacion,
   base,
+  catalog,
   captureLayout,
   equipmentFavorites,
+  equipmentOptions,
   modules,
+  onCloseTurno,
   rezagado,
   seguridad,
   setBarrenacion,
@@ -1893,9 +2177,12 @@ function TurnoCompletoForm({
 }: {
   barrenacion: BarrenacionRecord
   base: ShiftBase
+  catalog: CatalogState
   captureLayout: CaptureLayout
   equipmentFavorites: EquipmentFavorites
+  equipmentOptions: EquipmentOptions
   modules: TurnoModules
+  onCloseTurno: () => void
   rezagado: RezagadoRecord
   seguridad: SeguridadRecord
   setBarrenacion: (record: BarrenacionRecord) => void
@@ -1977,8 +2264,8 @@ function TurnoCompletoForm({
             <AssistantMetric label="Retro" value={rezagado.retro.length} />
           </div>
           <section className="turno-module-section assistant-active-module">
-            {activeAssistantModule === 'barrenacion' && <BarrenacionAssistantForm equipmentFavorites={equipmentFavorites} record={barrenacion} setRecord={setBarrenacion} />}
-            {activeAssistantModule === 'rezagado' && <RezagadoAssistantForm equipmentFavorites={equipmentFavorites} record={rezagado} setRecord={setRezagado} />}
+            {activeAssistantModule === 'barrenacion' && <BarrenacionAssistantForm catalog={catalog} equipmentFavorites={equipmentFavorites} equipmentOptions={equipmentOptions} record={barrenacion} setRecord={setBarrenacion} />}
+            {activeAssistantModule === 'rezagado' && <RezagadoAssistantForm catalog={catalog} equipmentFavorites={equipmentFavorites} equipmentOptions={equipmentOptions} record={rezagado} setRecord={setRezagado} />}
             {activeAssistantModule === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} showBaseFields={false} />}
           </section>
         </QuickSection>
@@ -1986,12 +2273,12 @@ function TurnoCompletoForm({
         <>
           {modules.barrenacion && (
             <section className="turno-module-section">
-              <BarrenacionForm record={barrenacion} setRecord={setBarrenacion} showBaseFields={false} />
+              <BarrenacionForm catalog={catalog} equipmentOptions={equipmentOptions} record={barrenacion} setRecord={setBarrenacion} showBaseFields={false} />
             </section>
           )}
           {modules.rezagado && (
             <section className="turno-module-section">
-              <RezagadoForm record={rezagado} setRecord={setRezagado} showBaseFields={false} />
+              <RezagadoForm catalog={catalog} equipmentOptions={equipmentOptions} record={rezagado} setRecord={setRezagado} showBaseFields={false} />
             </section>
           )}
           {modules.seguridad && (
@@ -2001,6 +2288,12 @@ function TurnoCompletoForm({
           )}
         </>
       )}
+      <div className="turno-close-strip">
+        <button className="secondary-action close-turno-action" type="button" onClick={onCloseTurno}>
+          <Lock size={18} /> Cerrar turno
+        </button>
+        <small>Marca la bitacora como cerrada, conserva firma/evidencia y la deja lista para sincronizar.</small>
+      </div>
     </div>
   )
 }
@@ -2015,11 +2308,15 @@ function AssistantMetric({ label, value }: { label: string; value: number }) {
 }
 
 function BarrenacionAssistantForm({
+  catalog,
   equipmentFavorites,
+  equipmentOptions,
   record,
   setRecord,
 }: {
+  catalog: CatalogState
   equipmentFavorites: EquipmentFavorites
+  equipmentOptions: EquipmentOptions
   record: BarrenacionRecord
   setRecord: (record: BarrenacionRecord) => void
 }) {
@@ -2043,7 +2340,7 @@ function BarrenacionAssistantForm({
   const drillRow = drillRows[safeIndex] ?? emptyDrillRow(defaultJumbo)
   const blastRow = blastRows[safeIndex] ?? emptyBlastRow()
   const drillEquipmentOptions = prioritizeOptions(
-    jumboEquipoOptions,
+    equipmentOptions.jumbo,
     drillRow.equipo,
     [...equipmentFavorites.jumbo, ...drillRows.map((row) => row.equipo)],
   )
@@ -2156,9 +2453,9 @@ function BarrenacionAssistantForm({
             ) : (
               <div className="form-grid quick">
                 <Field label="Equipo" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill({ equipo: value })} />
-                <Field label="Operador" value={drillRow.operador} onChange={(value) => updateDrill({ operador: value })} />
+                <Field label="Operador" value={drillRow.operador} suggestions={catalog.operadores} onChange={(value) => updateDrill({ operador: value })} />
                 <Field label="Ayudante" value={drillRow.ayudante} onChange={(value) => updateDrill({ ayudante: value })} />
-                <Field label="Nivel / obra" value={drillRow.nivelObra} onChange={(value) => updateDrill({ nivelObra: value })} />
+                <Field label="Nivel / obra" value={drillRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateDrill({ nivelObra: value })} />
                 <Field label="RPA / Cfte" value={drillRow.rpaCfte} onChange={(value) => updateDrill({ rpaCfte: value })} />
               </div>
             )}
@@ -2229,6 +2526,7 @@ function BarrenacionAssistantForm({
             </details>
             <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
             <TextArea label="Inasistencias / permisos" value={record.inasistencias} onChange={(value) => setRecord({ ...record, inasistencias: value })} />
+            <RecordExtrasPanel record={record} setRecord={setRecord} />
           </>
         )}
       </section>
@@ -2239,11 +2537,15 @@ function BarrenacionAssistantForm({
 }
 
 function RezagadoAssistantForm({
+  catalog,
   equipmentFavorites,
+  equipmentOptions,
   record,
   setRecord,
 }: {
+  catalog: CatalogState
   equipmentFavorites: EquipmentFavorites
+  equipmentOptions: EquipmentOptions
   record: RezagadoRecord
   setRecord: (record: RezagadoRecord) => void
 }) {
@@ -2266,12 +2568,12 @@ function RezagadoAssistantForm({
   const selectedScoopActivities = getSelectedHaulActivities(scoopRow)
   const selectedRetroActivities = getSelectedRetroActivities(retroRow)
   const scoopOptions = prioritizeOptions(
-    scoopEquipoOptions,
+    equipmentOptions.scoop,
     scoopRow.equipo,
     [...equipmentFavorites.scoop, ...scoopRows.map((row) => row.equipo)],
   )
   const retroOptions = prioritizeOptions(
-    retroEquipoOptions,
+    equipmentOptions.retro,
     retroRow.equipo,
     [...equipmentFavorites.retro, ...retroRows.map((row) => row.equipo)],
   )
@@ -2376,15 +2678,15 @@ function RezagadoAssistantForm({
             {isScoop ? (
               <div className="form-grid quick">
                 <Field label="Equipo" value={scoopRow.equipo} options={scoopOptions} onChange={(value) => updateScoopRow({ equipo: value })} />
-                <Field label="Operador" value={scoopRow.operador} onChange={(value) => updateScoopRow({ operador: value })} />
-                <Field label="Nivel / obra" value={scoopRow.nivelObra} onChange={(value) => updateScoopRow({ nivelObra: value })} />
-                <Field label="Destino" value={scoopRow.destino} onChange={(value) => updateScoopRow({ destino: value })} />
+                <Field label="Operador" value={scoopRow.operador} suggestions={catalog.operadores} onChange={(value) => updateScoopRow({ operador: value })} />
+                <Field label="Nivel / obra" value={scoopRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ nivelObra: value })} />
+                <Field label="Destino" value={scoopRow.destino} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ destino: value })} />
               </div>
             ) : (
               <div className="form-grid quick">
                 <Field label="Equipo" value={retroRow.equipo} options={retroOptions} onChange={(value) => updateRetroRow({ equipo: value })} />
-                <Field label="Operador" value={retroRow.operador} onChange={(value) => updateRetroRow({ operador: value })} />
-                <Field label="Nivel / obra" value={retroRow.nivelObra} onChange={(value) => updateRetroRow({ nivelObra: value })} />
+                <Field label="Operador" value={retroRow.operador} suggestions={catalog.operadores} onChange={(value) => updateRetroRow({ operador: value })} />
+                <Field label="Nivel / obra" value={retroRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateRetroRow({ nivelObra: value })} />
               </div>
             )}
           </>
@@ -2450,6 +2752,7 @@ function RezagadoAssistantForm({
               <TextArea label="Observaciones del equipo" value={retroRow.observaciones} onChange={(value) => updateRetroRow({ observaciones: value })} />
             )}
             <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+            <RecordExtrasPanel record={record} setRecord={setRecord} />
           </>
         )}
       </section>
@@ -2556,6 +2859,210 @@ function AssistantRowTools({
   )
 }
 
+function RecordExtrasPanel<T extends MineRecord>({
+  record,
+  setRecord,
+}: {
+  record: T
+  setRecord: (record: T) => void
+}) {
+  const [locationMessage, setLocationMessage] = useState('')
+  const evidencias = record.evidencias ?? []
+
+  async function addPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const dataUrl = await readFileAsDataUrl(file)
+    const nextPhoto: EvidencePhoto = {
+      id: crypto.randomUUID(),
+      dataUrl,
+      caption: file.name,
+      createdAt: nowIso(),
+    }
+    setRecord({ ...record, evidencias: [...evidencias, nextPhoto], updatedAt: nowIso(), syncedAt: undefined })
+    event.target.value = ''
+  }
+
+  function removePhoto(id: string) {
+    setRecord({ ...record, evidencias: evidencias.filter((photo) => photo.id !== id), updatedAt: nowIso(), syncedAt: undefined })
+  }
+
+  function captureLocation() {
+    if (!navigator.geolocation) {
+      setLocationMessage('Ubicacion no disponible en este dispositivo.')
+      return
+    }
+    setLocationMessage('Obteniendo ubicacion...')
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setRecord({
+          ...record,
+          location: {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+            capturedAt: nowIso(),
+          },
+          updatedAt: nowIso(),
+          syncedAt: undefined,
+        })
+        setLocationMessage('Ubicacion guardada.')
+      },
+      () => setLocationMessage('No se pudo obtener ubicacion. Revisa permisos del dispositivo.'),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    )
+  }
+
+  return (
+    <div className="record-extras">
+      <div className="extras-head">
+        <div>
+          <span>Evidencia y cierre</span>
+          <strong>Fotos, ubicacion y firma</strong>
+        </div>
+        {record.closedAt && <small><Lock size={14} /> Cerrado {formatDateTime(record.closedAt)}</small>}
+      </div>
+
+      <div className="extras-actions">
+        <label className="file-button evidence-upload">
+          <Camera size={17} /> Agregar foto
+          <input type="file" accept="image/*" capture="environment" onChange={(event) => void addPhoto(event)} />
+        </label>
+        <button type="button" onClick={captureLocation}>
+          <MapPin size={17} /> Guardar ubicacion
+        </button>
+      </div>
+
+      {locationMessage && <p className="extras-message">{locationMessage}</p>}
+      {record.location && (
+        <p className="extras-location">
+          <MapPin size={15} /> {record.location.latitude.toFixed(5)}, {record.location.longitude.toFixed(5)}
+          {record.location.accuracy ? ` | ${Math.round(record.location.accuracy)} m` : ''}
+        </p>
+      )}
+
+      {evidencias.length > 0 && (
+        <div className="evidence-grid">
+          {evidencias.map((photo) => (
+            <article key={photo.id}>
+              <img src={photo.dataUrl} alt={photo.caption || 'Evidencia'} />
+              <input
+                aria-label="Descripcion de evidencia"
+                value={photo.caption}
+                onChange={(event) => {
+                  const caption = event.target.value
+                  setRecord({
+                    ...record,
+                    evidencias: evidencias.map((item) => (item.id === photo.id ? { ...item, caption } : item)),
+                    updatedAt: nowIso(),
+                    syncedAt: undefined,
+                  })
+                }}
+              />
+              <button className="icon-button danger" type="button" onClick={() => removePhoto(photo.id)} aria-label="Eliminar evidencia">
+                <Trash2 size={15} />
+              </button>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <SignaturePad value={record.signatureDataUrl ?? ''} onChange={(value) => setRecord({ ...record, signatureDataUrl: value, updatedAt: nowIso(), syncedAt: undefined })} />
+    </div>
+  )
+}
+
+function SignaturePad({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const drawing = useRef(false)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const context = canvas.getContext('2d')
+    if (!context) return
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = '#fff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.strokeStyle = '#17212b'
+    context.lineWidth = 3
+    context.lineCap = 'round'
+    if (!value) return
+    const image = new Image()
+    image.onload = () => context.drawImage(image, 0, 0, canvas.width, canvas.height)
+    image.src = value
+  }, [value])
+
+  function getPoint(event: PointerEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current
+    if (!canvas) return { x: 0, y: 0 }
+    const rect = canvas.getBoundingClientRect()
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((event.clientY - rect.top) / rect.height) * canvas.height,
+    }
+  }
+
+  function start(event: PointerEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current
+    const context = canvas?.getContext('2d')
+    if (!canvas || !context) return
+    drawing.current = true
+    canvas.setPointerCapture(event.pointerId)
+    const point = getPoint(event)
+    context.beginPath()
+    context.moveTo(point.x, point.y)
+  }
+
+  function move(event: PointerEvent<HTMLCanvasElement>) {
+    if (!drawing.current) return
+    const context = canvasRef.current?.getContext('2d')
+    if (!context) return
+    const point = getPoint(event)
+    context.lineTo(point.x, point.y)
+    context.stroke()
+  }
+
+  function end() {
+    if (!drawing.current) return
+    drawing.current = false
+    const canvas = canvasRef.current
+    if (canvas) onChange(canvas.toDataURL('image/png'))
+  }
+
+  function clear() {
+    const canvas = canvasRef.current
+    const context = canvas?.getContext('2d')
+    if (!canvas || !context) return
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = '#fff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    onChange('')
+  }
+
+  return (
+    <div className="signature-pad">
+      <div className="extras-head">
+        <div>
+          <span>Firma del supervisor</span>
+          <strong>Firma para cierre o revision</strong>
+        </div>
+        <button type="button" onClick={clear}>Limpiar</button>
+      </div>
+      <canvas
+        ref={canvasRef}
+        width={720}
+        height={220}
+        onPointerDown={start}
+        onPointerMove={move}
+        onPointerUp={end}
+        onPointerCancel={end}
+        aria-label="Firma del supervisor"
+      />
+    </div>
+  )
+}
+
 function ShiftBaseFields({ base, setBase }: { base: ShiftBase; setBase: (base: ShiftBase) => void }) {
   return (
     <div className="form-grid four">
@@ -2597,10 +3104,14 @@ function BaseFields<T extends BaseRecord>({
 }
 
 function BarrenacionForm({
+  catalog,
+  equipmentOptions,
   record,
   setRecord,
   showBaseFields = true,
 }: {
+  catalog: CatalogState
+  equipmentOptions: EquipmentOptions
   record: BarrenacionRecord
   setRecord: (record: BarrenacionRecord) => void
   showBaseFields?: boolean
@@ -2741,10 +3252,10 @@ function BarrenacionForm({
                 </button>
               </div>
               <div className="form-grid quick">
-                <Field label="Equipo" value={row.equipo} options={jumboEquipoOptions} onChange={(value) => updateDrill(activity, index, { equipo: value })} />
-                <Field label="Operador" value={row.operador} onChange={(value) => updateDrill(activity, index, { operador: value })} />
+                <Field label="Equipo" value={row.equipo} options={equipmentOptions.jumbo} onChange={(value) => updateDrill(activity, index, { equipo: value })} />
+                <Field label="Operador" value={row.operador} suggestions={catalog.operadores} onChange={(value) => updateDrill(activity, index, { operador: value })} />
                 <Field label="Ayudante" value={row.ayudante} onChange={(value) => updateDrill(activity, index, { ayudante: value })} />
-                <Field label="Nivel / obra" value={row.nivelObra} onChange={(value) => updateDrill(activity, index, { nivelObra: value })} />
+                <Field label="Nivel / obra" value={row.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateDrill(activity, index, { nivelObra: value })} />
                 <Field label="RPA / Cfte" value={row.rpaCfte} onChange={(value) => updateDrill(activity, index, { rpaCfte: value })} />
                 <Field label="Barrenos dados" type="number" value={row.barrenosDados} onChange={(value) => updateDrill(activity, index, { barrenosDados: Number(value) })} />
                 <Field label="Barrenos cargados" type="number" value={row.barrenosCargados} onChange={(value) => updateDrill(activity, index, { barrenosCargados: Number(value) })} />
@@ -2783,16 +3294,21 @@ function BarrenacionForm({
         </div>
         <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
         <TextArea label="Inasistencias / permisos" value={record.inasistencias} onChange={(value) => setRecord({ ...record, inasistencias: value })} />
+        <RecordExtrasPanel record={record} setRecord={setRecord} />
       </QuickSection>
     </>
   )
 }
 
 function RezagadoForm({
+  catalog,
+  equipmentOptions,
   record,
   setRecord,
   showBaseFields = true,
 }: {
+  catalog: CatalogState
+  equipmentOptions: EquipmentOptions
   record: RezagadoRecord
   setRecord: (record: RezagadoRecord) => void
   showBaseFields?: boolean
@@ -2879,10 +3395,10 @@ function RezagadoForm({
                     </button>
                   </div>
                   <div className="form-grid quick">
-                    <Field label="Equipo" value={row.equipo} options={scoopEquipoOptions} onChange={(value) => updateScoopRow(index, { equipo: value })} />
-                    <Field label="Operador" value={row.operador} onChange={(value) => updateScoopRow(index, { operador: value })} />
-                    <Field label="Nivel / obra" value={row.nivelObra} onChange={(value) => updateScoopRow(index, { nivelObra: value })} />
-                    <Field label="Destino" value={row.destino} onChange={(value) => updateScoopRow(index, { destino: value })} />
+                    <Field label="Equipo" value={row.equipo} options={equipmentOptions.scoop} onChange={(value) => updateScoopRow(index, { equipo: value })} />
+                    <Field label="Operador" value={row.operador} suggestions={catalog.operadores} onChange={(value) => updateScoopRow(index, { operador: value })} />
+                    <Field label="Nivel / obra" value={row.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateScoopRow(index, { nivelObra: value })} />
+                    <Field label="Destino" value={row.destino} suggestions={catalog.niveles} onChange={(value) => updateScoopRow(index, { destino: value })} />
                   </div>
                   <div className="quick-choice-grid compact multi-choice-grid">
                     {haulActivityKeys.map((key) => (
@@ -2930,9 +3446,9 @@ function RezagadoForm({
                     </button>
                   </div>
                   <div className="form-grid quick">
-                    <Field label="Equipo" value={row.equipo} options={retroEquipoOptions} onChange={(value) => updateRetroRow(index, { equipo: value })} />
-                    <Field label="Operador" value={row.operador} onChange={(value) => updateRetroRow(index, { operador: value })} />
-                    <Field label="Nivel / obra" value={row.nivelObra} onChange={(value) => updateRetroRow(index, { nivelObra: value })} />
+                    <Field label="Equipo" value={row.equipo} options={equipmentOptions.retro} onChange={(value) => updateRetroRow(index, { equipo: value })} />
+                    <Field label="Operador" value={row.operador} suggestions={catalog.operadores} onChange={(value) => updateRetroRow(index, { operador: value })} />
+                    <Field label="Nivel / obra" value={row.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateRetroRow(index, { nivelObra: value })} />
                   </div>
                   <div className="quick-choice-grid compact multi-choice-grid">
                     {retroActivityKeys.map((key) => (
@@ -2961,6 +3477,7 @@ function RezagadoForm({
       </QuickSection>
       <QuickSection title="Cierre" icon={<ClipboardCheck size={18} />} anchorId="capture-cierre">
         <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+        <RecordExtrasPanel record={record} setRecord={setRecord} />
       </QuickSection>
     </>
   )
@@ -3000,6 +3517,7 @@ function SeguridadForm({
           <TextArea label="Actividades de operacion" value={record.actividadesOperacion} onChange={(value) => setRecord({ ...record, actividadesOperacion: value })} />
         </details>
         <TextArea label="Observaciones" value={record.observaciones} onChange={(value) => setRecord({ ...record, observaciones: value })} />
+        <RecordExtrasPanel record={record} setRecord={setRecord} />
       </QuickSection>
     </>
   )
@@ -3046,6 +3564,7 @@ function Field({
   type = 'text',
   required = false,
   options,
+  suggestions,
 }: {
   label: string
   value: string | number
@@ -3053,8 +3572,10 @@ function Field({
   type?: string
   required?: boolean
   options?: string[]
+  suggestions?: string[]
 }) {
   const textValue = String(value)
+  const datalistId = suggestions?.length ? `list-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : undefined
   return (
     <label>
       {label}
@@ -3069,14 +3590,22 @@ function Field({
           ))}
         </select>
       ) : (
-        <input
-          required={required}
-          type={type}
-          value={value}
-          min={type === 'number' ? 0 : undefined}
-          step={type === 'number' ? '0.01' : undefined}
-          onChange={(event) => onChange(event.target.value)}
-        />
+        <>
+          <input
+            required={required}
+            type={type}
+            value={value}
+            min={type === 'number' ? 0 : undefined}
+            step={type === 'number' ? '0.01' : undefined}
+            list={datalistId}
+            onChange={(event) => onChange(event.target.value)}
+          />
+          {datalistId && (
+            <datalist id={datalistId}>
+              {(suggestions ?? []).map((item) => <option key={item} value={item} />)}
+            </datalist>
+          )}
+        </>
       )}
     </label>
   )
@@ -3116,6 +3645,44 @@ function Metric({ label, value }: { label: string; value: number }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  )
+}
+
+function EquipmentDashboard({ rows }: { rows: EquipmentSummary[] }) {
+  return (
+    <section className="equipment-dashboard">
+      <div className="section-heading">
+        <h2>Dashboard por equipo</h2>
+      </div>
+      {rows.length === 0 ? (
+        <p>Sin produccion por equipo para el filtro actual.</p>
+      ) : (
+        <div className="equipment-grid">
+          {rows.slice(0, 12).map((row) => (
+            <article key={`${row.tipo}-${row.equipo}`}>
+              <span>{row.tipo}</span>
+              <strong>{row.equipo}</strong>
+              <div>
+                <small>Registros</small>
+                <b>{row.registros}</b>
+              </div>
+              <div>
+                <small>Metros</small>
+                <b>{row.metrosDados + row.metrosPegados}</b>
+              </div>
+              <div>
+                <small>Rezagado</small>
+                <b>{row.rezagado}</b>
+              </div>
+              <div>
+                <small>Diesel</small>
+                <b>{row.diesel}</b>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -3581,6 +4148,7 @@ function getInitialSection(): AppSection {
   if (requestedView === 'inicio' || requestedView === 'home') return 'home'
   if (requestedView === 'captura') return 'captura'
   if (requestedView === 'historial' || requestedView === 'bitacora') return 'historial'
+  if (requestedView === 'catalogo') return 'catalogo'
   if (isApk && (requestedView === 'revision' || requestedView === 'dashboard')) return 'historial'
   if (!isApk && (requestedView === 'revision' || requestedView === 'dashboard')) return 'dashboard'
   return isApk ? 'home' : 'dashboard'
@@ -3596,6 +4164,49 @@ function loadWhatsAppNumber() {
 
 function loadOperatorMode() {
   return localStorage.getItem(OPERATOR_MODE_KEY) === '1'
+}
+
+function loadUserRole(): UserRole {
+  const stored = localStorage.getItem(ROLE_KEY)
+  return isUserRole(stored) ? stored : 'supervisor'
+}
+
+function loadCatalog(): CatalogState {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CATALOG_KEY) ?? '{}') as Partial<CatalogState>
+    return {
+      jumbo: mergeCatalogList(stored.jumbo ?? [], jumboEquipoOptions),
+      scoop: mergeCatalogList(stored.scoop ?? [], scoopEquipoOptions),
+      retro: mergeCatalogList(stored.retro ?? [], retroEquipoOptions),
+      operadores: mergeCatalogList(stored.operadores ?? [], []),
+      niveles: mergeCatalogList(stored.niveles ?? [], []),
+    }
+  } catch {
+    return {
+      jumbo: [...defaultCatalog.jumbo],
+      scoop: [...defaultCatalog.scoop],
+      retro: [...defaultCatalog.retro],
+      operadores: [],
+      niveles: [],
+    }
+  }
+}
+
+function mergeCatalogList(primary: unknown, fallback: unknown): string[] {
+  const seen = new Set<string>()
+  const output: string[] = []
+  const values = [
+    ...(Array.isArray(primary) ? primary : []),
+    ...(Array.isArray(fallback) ? fallback : []),
+  ]
+  values.forEach((item) => {
+    const value = String(item ?? '').trim()
+    const key = value.toLowerCase()
+    if (!value || seen.has(key)) return
+    seen.add(key)
+    output.push(value)
+  })
+  return output
 }
 
 function normalizeWhatsAppNumber(value: string) {
@@ -3626,13 +4237,15 @@ function normalizeTurnoModules(modules?: Partial<TurnoModules>): TurnoModules {
   }
 }
 
-function applyShiftBase<T extends MineRecord>(record: T, base: ShiftBase, updatedAt: string): T {
+function applyShiftBase<T extends MineRecord>(record: T, base: ShiftBase, updatedAt: string, role: UserRole = 'supervisor', closeTurno = false): T {
   return normalizeRecord({
     ...record,
     ...base,
+    role,
     updatedAt,
     deletedAt: undefined,
     syncedAt: undefined,
+    ...(closeTurno ? { closedAt: updatedAt, closedBy: role } : {}),
   } as MineRecord) as T
 }
 
@@ -3640,27 +4253,91 @@ function normalizeRecord(record: MineRecord): MineRecord {
   const createdAt = record.createdAt ?? nowIso()
   const baseRecord = {
     ...record,
+    id: record.id || crypto.randomUUID(),
+    supervisor: typeof record.supervisor === 'string' ? record.supervisor : '',
+    fecha: typeof record.fecha === 'string' && record.fecha ? record.fecha : today,
+    turno: record.turno === '2' ? '2' : '1',
+    unidad: typeof record.unidad === 'string' && record.unidad ? record.unidad : baseDefaults.unidad,
     createdAt,
     updatedAt: record.updatedAt ?? createdAt,
+    deletedAt: typeof record.deletedAt === 'string' ? record.deletedAt : undefined,
+    syncedAt: typeof record.syncedAt === 'string' ? record.syncedAt : undefined,
+    role: isUserRole(record.role) ? record.role : undefined,
+    evidencias: normalizeEvidencePhotos(record.evidencias),
+    signatureDataUrl: typeof record.signatureDataUrl === 'string' ? record.signatureDataUrl : '',
+    location: isLocationSnapshot(record.location) ? record.location : undefined,
+    closedAt: typeof record.closedAt === 'string' ? record.closedAt : undefined,
+    closedBy: typeof record.closedBy === 'string' ? record.closedBy : undefined,
   } as MineRecord
 
   if (baseRecord.type === 'barrenacion') {
-    return {
+    const barrenacionRecord = {
       ...baseRecord,
-      activeActivity: getBarrenacionActivity(baseRecord),
+      jumbo: Array.isArray(baseRecord.jumbo) ? baseRecord.jumbo : [],
+      maquinaPierna: Array.isArray(baseRecord.maquinaPierna) ? baseRecord.maquinaPierna : [],
+      voladuras: Array.isArray(baseRecord.voladuras) ? baseRecord.voladuras : [],
+      polvorero: baseRecord.polvorero ?? '',
+      choferCamion: baseRecord.choferCamion ?? '',
+      choferPipa: baseRecord.choferPipa ?? '',
+      bobCat: baseRecord.bobCat ?? '',
+      bombeo: baseRecord.bombeo ?? '',
+      servicios: baseRecord.servicios ?? '',
+      comentarios: baseRecord.comentarios ?? '',
+      inasistencias: baseRecord.inasistencias ?? '',
+    } as BarrenacionRecord
+    return {
+      ...barrenacionRecord,
+      activeActivity: getBarrenacionActivity(barrenacionRecord),
     }
   }
   if (baseRecord.type === 'rezagado') {
-    const scoopRow = baseRecord.scoopTram[0] ?? emptyHaulRow(defaultScoop)
-    const retroRow = baseRecord.retro[0] ?? emptyRetroRow()
-    return {
+    const rezagadoRecord = {
       ...baseRecord,
-      activeEquipment: getRezagadoEquipment(baseRecord),
-      activeHaulActivity: getHaulActivity(baseRecord, scoopRow),
-      activeRetroActivity: getRetroActivity(baseRecord, retroRow),
+      scoopTram: Array.isArray(baseRecord.scoopTram) ? baseRecord.scoopTram : [],
+      retro: Array.isArray(baseRecord.retro) ? baseRecord.retro : [],
+      comentarios: baseRecord.comentarios ?? '',
+    } as RezagadoRecord
+    const scoopRow = rezagadoRecord.scoopTram[0] ?? emptyHaulRow(defaultScoop)
+    const retroRow = rezagadoRecord.retro[0] ?? emptyRetroRow()
+    return {
+      ...rezagadoRecord,
+      activeEquipment: getRezagadoEquipment(rezagadoRecord),
+      activeHaulActivity: getHaulActivity(rezagadoRecord, scoopRow),
+      activeRetroActivity: getRetroActivity(rezagadoRecord, retroRow),
     }
   }
-  return baseRecord
+  return {
+    ...baseRecord,
+    accidentes: Number(baseRecord.accidentes || 0),
+    incidentes: Number(baseRecord.incidentes || 0),
+    actosInseguros: baseRecord.actosInseguros ?? '',
+    condicionesInseguras: baseRecord.condicionesInseguras ?? '',
+    fuerzaLaboral: Number(baseRecord.fuerzaLaboral || 0),
+    platicaSeguridad: baseRecord.platicaSeguridad ?? '',
+    actividadesSeguridad: baseRecord.actividadesSeguridad ?? '',
+    correccionesMejoras: baseRecord.correccionesMejoras ?? '',
+    actividadesOperacion: baseRecord.actividadesOperacion ?? '',
+    observaciones: baseRecord.observaciones ?? '',
+  } as SeguridadRecord
+}
+
+function normalizeEvidencePhotos(value: unknown): EvidencePhoto[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => item as Partial<EvidencePhoto>)
+    .filter((item) => typeof item.dataUrl === 'string' && item.dataUrl)
+    .map((item) => ({
+      id: item.id || crypto.randomUUID(),
+      dataUrl: item.dataUrl ?? '',
+      caption: item.caption ?? '',
+      createdAt: item.createdAt ?? nowIso(),
+    }))
+}
+
+function isLocationSnapshot(value: unknown): value is LocationSnapshot {
+  if (!value || typeof value !== 'object') return false
+  const item = value as Partial<LocationSnapshot>
+  return typeof item.latitude === 'number' && typeof item.longitude === 'number' && typeof item.capturedAt === 'string'
 }
 
 function normalizeChatMessage(message: ChatMessage): ChatMessage {
@@ -3733,6 +4410,92 @@ function buildEquipmentFavorites(records: MineRecord[]): EquipmentFavorites {
     scoop: sorted(counters.scoop),
     retro: sorted(counters.retro),
   }
+}
+
+function buildEquipmentSummary(records: MineRecord[]): EquipmentSummary[] {
+  const map = new Map<string, EquipmentSummary>()
+
+  function getSummary(tipo: string, equipo: string) {
+    const cleanEquipo = equipo.trim() || 'Sin equipo'
+    const key = `${tipo}:${cleanEquipo}`.toLowerCase()
+    const current = map.get(key)
+    if (current) return current
+    const next: EquipmentSummary = {
+      equipo: cleanEquipo,
+      tipo,
+      registros: 0,
+      metrosDados: 0,
+      metrosPegados: 0,
+      rezagado: 0,
+      camiones: 0,
+      diesel: 0,
+      horas: 0,
+    }
+    map.set(key, next)
+    return next
+  }
+
+  records.forEach((record) => {
+    if (record.type === 'barrenacion') {
+      record.jumbo.forEach((row) => {
+        if (!hasDrillData(row) && !row.equipo.trim()) return
+        const item = getSummary('Jumbo', row.equipo)
+        item.registros += 1
+        item.metrosDados += Number(row.metrosDados || 0)
+        item.horas += Number(row.horasServicio || 0)
+      })
+      record.maquinaPierna.forEach((row) => {
+        if (!hasDrillData(row) && !row.equipo.trim()) return
+        const item = getSummary('Maquina pierna', row.equipo)
+        item.registros += 1
+        item.metrosDados += Number(row.metrosDados || 0)
+        item.horas += Number(row.horasServicio || 0)
+      })
+      record.voladuras.forEach((row) => {
+        if (!hasBlastData(row)) return
+        const item = getSummary('Voladura', row.obra || 'Frente sin nombre')
+        item.registros += 1
+        item.metrosPegados += Number(row.metrosPegados || 0)
+        item.horas += Number(row.horasServicio || 0)
+      })
+    }
+
+    if (record.type === 'rezagado') {
+      record.scoopTram.forEach((row) => {
+        if (!hasHaulData(row) && !row.equipo.trim()) return
+        const item = getSummary('Scoop tram', row.equipo)
+        item.registros += 1
+        item.rezagado += Number(row.rezagado || 0)
+          + Number(row.traspaleo || 0)
+          + Number(row.limpia || 0)
+          + Number(row.balastreo || 0)
+          + Number(row.planilla || 0)
+          + Number(row.relleno || 0)
+        item.camiones += Number(row.camiones || 0)
+        item.diesel += Number(row.diesel || 0)
+        if (row.horometroFinal > row.horometroInicial) item.horas += row.horometroFinal - row.horometroInicial
+      })
+      record.retro.forEach((row) => {
+        if (!hasRetroData(row) && !row.equipo.trim()) return
+        const item = getSummary('Retro', row.equipo)
+        item.registros += 1
+        item.rezagado += Number(row.amacice || 0)
+          + Number(row.reAmacice || 0)
+          + Number(row.tableo || 0)
+          + Number(row.limpia || 0)
+          + Number(row.balastreo || 0)
+          + Number(row.mtAcequia || 0)
+        item.diesel += Number(row.diesel || 0)
+        if (row.horometroFinal > row.horometroInicial) item.horas += row.horometroFinal - row.horometroInicial
+      })
+    }
+  })
+
+  return Array.from(map.values()).sort((a, b) => {
+    const productionA = a.metrosDados + a.metrosPegados + a.rezagado + a.camiones
+    const productionB = b.metrosDados + b.metrosPegados + b.rezagado + b.camiones
+    return productionB - productionA || b.registros - a.registros || a.equipo.localeCompare(b.equipo)
+  })
 }
 
 function prioritizeOptions(options: string[], selected: string, favorites: string[]) {
@@ -3924,6 +4687,14 @@ function labelChatType(type: ChatMessageType) {
   }[type]
 }
 
+function roleLabel(role: UserRole) {
+  return {
+    supervisor: 'Supervisor',
+    administrador: 'Administrador',
+    gerencia: 'Gerencia',
+  }[role]
+}
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString('es-MX', {
     dateStyle: 'short',
@@ -4066,6 +4837,10 @@ function blobToDataUrl(blob: Blob) {
     reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(blob)
   })
+}
+
+function readFileAsDataUrl(file: File) {
+  return blobToDataUrl(file)
 }
 
 function addHeaderRow(sheet: ExcelJS.Worksheet, rowNumber: number, headers: string[]) {
@@ -4232,6 +5007,22 @@ function hasCaptureDraftContent(draft: CaptureDraft) {
   )
 }
 
+function hasTurnoDraftContent(
+  base: ShiftBase,
+  modules: TurnoModules,
+  barrenacion: BarrenacionRecord,
+  rezagado: RezagadoRecord,
+  seguridad: SeguridadRecord,
+) {
+  return Boolean(
+    hasShiftBaseData(base)
+      || modulesChanged(modules)
+      || hasRecordDraftData(barrenacion)
+      || hasRecordDraftData(rezagado)
+      || hasRecordDraftData(seguridad),
+  )
+}
+
 function hasShiftBaseData(base: ShiftBase) {
   return Boolean(
     base.supervisor.trim()
@@ -4248,6 +5039,7 @@ function modulesChanged(modules: TurnoModules) {
 }
 
 function hasRecordDraftData(record: MineRecord) {
+  if ((record.evidencias?.length ?? 0) > 0 || record.signatureDataUrl || record.location || record.closedAt) return true
   if (hasShiftBaseData(record)) return true
   if (record.type === 'barrenacion') {
     return Boolean(
@@ -4307,6 +5099,10 @@ function isHaulActivity(value: unknown): value is HaulActivity {
 
 function isRetroActivity(value: unknown): value is RetroActivity {
   return retroActivityKeys.includes(value as RetroActivity)
+}
+
+function isUserRole(value: unknown): value is UserRole {
+  return value === 'supervisor' || value === 'administrador' || value === 'gerencia'
 }
 
 function getActiveKey<T, K extends keyof T>(
