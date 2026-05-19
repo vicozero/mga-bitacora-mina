@@ -3604,9 +3604,72 @@ function BarrenacionForm({
     setRecord({ ...record, activeActivity: 'voladura', voladuras: nextRows.length ? nextRows : [emptyBlastRow()] })
   }
 
+  function applyQuickCapture(text: string) {
+    const parsed = parseQuickCapture(text, {
+      equipment: equipmentOptions.jumbo,
+      operadores: catalog.operadores,
+      niveles: catalog.niveles,
+    })
+    const nextActivity: BarrenacionActivity = parsed.activity === 'voladura'
+      ? 'voladura'
+      : parsed.activity === 'maquinaPierna'
+      ? 'maquinaPierna'
+      : parsed.activity === 'jumbo'
+      ? 'jumbo'
+      : activity
+
+    if (nextActivity === 'voladura') {
+      const rows = record.voladuras.length ? record.voladuras : [emptyBlastRow()]
+      setRecord({
+        ...record,
+        activeActivity: 'voladura',
+        voladuras: rows.map((row, index) => index === 0 ? {
+          ...row,
+          obra: parsed.obra ?? row.obra,
+          oficial: parsed.operador ?? row.oficial,
+          ayudante: parsed.ayudante ?? row.ayudante,
+          barrenosPegados: parsed.barrenos ?? row.barrenosPegados,
+          metrosPegados: parsed.metrosPegados ?? parsed.metros ?? row.metrosPegados,
+          horasServicio: parsed.horas ?? row.horasServicio,
+          observaciones: mergeNotes(row.observaciones, parsed.notes),
+        } : row),
+      })
+      return
+    }
+
+    const kind = nextActivity === 'maquinaPierna' ? 'maquinaPierna' : 'jumbo'
+    const rows = kind === 'maquinaPierna'
+      ? (record.maquinaPierna.length ? record.maquinaPierna : [emptyDrillRow(defaultJumbo)])
+      : (record.jumbo.length ? record.jumbo : [emptyDrillRow(defaultJumbo)])
+    const nextRows = rows.map((row, index) => index === 0 ? {
+      ...row,
+      equipo: parsed.equipment ?? row.equipo,
+      operador: parsed.operador ?? row.operador,
+      ayudante: parsed.ayudante ?? row.ayudante,
+      nivelObra: parsed.nivelObra ?? row.nivelObra,
+      barrenosDados: parsed.barrenos ?? row.barrenosDados,
+      barrenosCargados: parsed.barrenosCargados ?? row.barrenosCargados,
+      metrosDados: parsed.metros ?? row.metrosDados,
+      horasServicio: parsed.horas ?? row.horasServicio,
+      horometroDieselInicial: parsed.horometroInicial ?? row.horometroDieselInicial,
+      horometroDieselFinal: parsed.horometroFinal ?? row.horometroDieselFinal,
+    } : row)
+    setRecord({
+      ...record,
+      activeActivity: kind,
+      jumbo: kind === 'jumbo' ? nextRows : record.jumbo,
+      maquinaPierna: kind === 'maquinaPierna' ? nextRows : record.maquinaPierna,
+    })
+  }
+
   return (
     <>
       <PanelTitle title="Captura de turno barrenacion y voladuras" subtitle="Varios equipos por supervisor" />
+      <QuickCaptureBar
+        label="Captura rapida"
+        placeholder="Ej. JL-019 operador Juan nivel 10300 12 barrenos 36 metros"
+        onApply={applyQuickCapture}
+      />
       {showBaseFields && (
         <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
           <BaseFields record={record} setRecord={setRecord} />
@@ -3681,6 +3744,7 @@ function BarrenacionForm({
                   <Trash2 size={16} />
                 </button>
               </div>
+              <QrScanButton onResult={(value) => updateDrill(activity, index, { equipo: resolveScannedEquipment(value, equipmentOptions.jumbo) })} />
               <div className="form-grid quick">
                 <Field label="Equipo" value={row.equipo} options={equipmentOptions.jumbo} onChange={(value) => updateDrill(activity, index, { equipo: value })} />
                 <Field label="Operador" value={row.operador} suggestions={catalog.operadores} onChange={(value) => updateDrill(activity, index, { operador: value })} />
@@ -3788,9 +3852,70 @@ function RezagadoForm({
     updateRetroRow(index, { selectedActivities: nextSelected, [key]: nextSelected.includes(key) ? row[key] : 0 } as Partial<RetroRow>)
   }
 
+  function applyQuickCapture(text: string) {
+    const parsed = parseQuickCapture(text, {
+      equipment: [...equipmentOptions.scoop, ...equipmentOptions.retro],
+      operadores: catalog.operadores,
+      niveles: catalog.niveles,
+    })
+    const nextEquipment: RezagadoEquipment = parsed.activity === 'retro' || (parsed.equipment && equipmentOptions.retro.includes(parsed.equipment))
+      ? 'retro'
+      : parsed.activity === 'scoop' || (parsed.equipment && equipmentOptions.scoop.includes(parsed.equipment))
+      ? 'scoop'
+      : equipment
+
+    if (nextEquipment === 'retro') {
+      const rows = record.retro.length ? record.retro : [emptyRetroRow()]
+      const activityKey = isRetroActivity(parsed.activity) ? parsed.activity : 'amacice'
+      setRecord({
+        ...record,
+        activeEquipment: 'retro',
+        retro: rows.map((row, index) => index === 0 ? {
+          ...row,
+          selectedActivities: Array.from(new Set([...getSelectedRetroActivities(row), activityKey])),
+          equipo: parsed.equipment ?? row.equipo,
+          operador: parsed.operador ?? row.operador,
+          nivelObra: parsed.nivelObra ?? row.nivelObra,
+          [activityKey]: parsed.metros ?? row[activityKey],
+          horometroInicial: parsed.horometroInicial ?? row.horometroInicial,
+          horometroFinal: parsed.horometroFinal ?? row.horometroFinal,
+          diesel: parsed.diesel ?? row.diesel,
+          observaciones: mergeNotes(row.observaciones, parsed.notes),
+        } : row),
+      })
+      return
+    }
+
+    const rows = record.scoopTram.length ? record.scoopTram : [emptyHaulRow(defaultScoop)]
+    const activityKey = isHaulActivity(parsed.activity) ? parsed.activity : 'rezagado'
+    setRecord({
+      ...record,
+      activeEquipment: 'scoop',
+      scoopTram: rows.map((row, index) => index === 0 ? {
+        ...row,
+        selectedActivities: Array.from(new Set([...getSelectedHaulActivities(row), activityKey])),
+        equipo: parsed.equipment ?? row.equipo,
+        operador: parsed.operador ?? row.operador,
+        nivelObra: parsed.nivelObra ?? row.nivelObra,
+        destino: parsed.destino ?? row.destino,
+        [activityKey]: parsed.metros ?? row[activityKey],
+        camiones: parsed.camiones ?? row.camiones,
+        horometroInicial: parsed.horometroInicial ?? row.horometroInicial,
+        horometroFinal: parsed.horometroFinal ?? row.horometroFinal,
+        diesel: parsed.diesel ?? row.diesel,
+        observaciones: mergeNotes(row.observaciones, parsed.notes),
+      } : row),
+    })
+  }
+
   return (
     <>
       <PanelTitle title="Captura de turno rezagado" subtitle="Varios equipos y actividades" />
+      <QuickCaptureBar
+        label="Captura rapida"
+        placeholder="Ej. ST-018 operador Juan nivel 10300 rezagado 8 camiones diesel 40"
+        onApply={applyQuickCapture}
+      />
       {showBaseFields && (
         <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
           <BaseFields record={record} setRecord={setRecord} />
@@ -3824,6 +3949,7 @@ function RezagadoForm({
                       <Trash2 size={16} />
                     </button>
                   </div>
+                  <QrScanButton onResult={(value) => updateScoopRow(index, { equipo: resolveScannedEquipment(value, equipmentOptions.scoop) })} />
                   <div className="form-grid quick">
                     <Field label="Equipo" value={row.equipo} options={equipmentOptions.scoop} onChange={(value) => updateScoopRow(index, { equipo: value })} />
                     <Field label="Operador" value={row.operador} suggestions={catalog.operadores} onChange={(value) => updateScoopRow(index, { operador: value })} />
@@ -3875,6 +4001,7 @@ function RezagadoForm({
                       <Trash2 size={16} />
                     </button>
                   </div>
+                  <QrScanButton onResult={(value) => updateRetroRow(index, { equipo: resolveScannedEquipment(value, equipmentOptions.retro) })} />
                   <div className="form-grid quick">
                     <Field label="Equipo" value={row.equipo} options={equipmentOptions.retro} onChange={(value) => updateRetroRow(index, { equipo: value })} />
                     <Field label="Operador" value={row.operador} suggestions={catalog.operadores} onChange={(value) => updateRetroRow(index, { operador: value })} />
