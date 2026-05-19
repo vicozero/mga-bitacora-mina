@@ -1967,7 +1967,7 @@ th {
 @media (max-width: 720px) {
   .app-shell {
     overflow-x: hidden;
-    padding-bottom: 78px;
+    padding-bottom: calc(128px + env(safe-area-inset-bottom));
   }
 
   .dashboard-tools {
@@ -2062,6 +2062,10 @@ th {
     padding: 0 16px;
   }
 
+  .workspace {
+    padding-bottom: 128px;
+  }
+
   .home-screen,
   .history-screen {
     margin: 16px auto 96px;
@@ -2123,6 +2127,11 @@ th {
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.94);
     box-shadow: 0 12px 28px rgba(23, 37, 51, 0.08);
+  }
+
+  .assistant-module-nav button,
+  .capture-layout-tabs button {
+    scroll-margin-bottom: 128px;
   }
 
   .history-head {
@@ -2351,7 +2360,7 @@ th {
   .mobile-bottom-nav {
     position: fixed;
     right: 10px;
-    bottom: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
     left: 10px;
     z-index: 25;
     display: grid;
