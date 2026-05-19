@@ -40,7 +40,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 import ExcelJS from 'exceljs'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
@@ -103,6 +103,13 @@ type BarcodeDetectorLike = {
 }
 
 type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => BarcodeDetectorLike
+type MgaSpeechPlugin = {
+  isSupported: () => Promise<{ supported: boolean }>
+  start: (options?: { language?: string; offline?: boolean }) => Promise<{ transcript: string }>
+  stop: () => Promise<void>
+}
+
+const MgaSpeech = registerPlugin<MgaSpeechPlugin>('MgaSpeech')
 
 declare global {
   interface Window {
@@ -3112,6 +3119,14 @@ function AssistantRowTools({
   )
 }
 
+function getSpeechErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '')
+  if (/permission|permiso|denied/i.test(message)) return 'Permiso de microfono denegado.'
+  if (/network|internet|offline/i.test(message)) return 'Voz no disponible sin servicio de reconocimiento instalado.'
+  if (/no speech|sin voz|no se detecto/i.test(message)) return 'No se detecto voz.'
+  return message || 'No se pudo escuchar. Revisa permisos del microfono.'
+}
+
 function QuickCaptureBar({
   label,
   onApply,
@@ -3125,6 +3140,7 @@ function QuickCaptureBar({
   const [listening, setListening] = useState(false)
   const [message, setMessage] = useState('')
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const voiceCancelRef = useRef(false)
 
   function apply() {
     const clean = text.trim()
@@ -3136,8 +3152,14 @@ function QuickCaptureBar({
 
   function toggleVoice() {
     if (listening) {
+      voiceCancelRef.current = true
       recognitionRef.current?.stop()
+      if (Capacitor.getPlatform() === 'android') void MgaSpeech.stop().catch(() => undefined)
       setListening(false)
+      return
+    }
+    if (Capacitor.getPlatform() === 'android') {
+      void startAndroidVoice()
       return
     }
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition
@@ -3164,6 +3186,32 @@ function QuickCaptureBar({
     setListening(true)
     setMessage('')
     recognition.start()
+  }
+
+  async function startAndroidVoice() {
+    voiceCancelRef.current = false
+    setListening(true)
+    setMessage('Escuchando...')
+    try {
+      const support = await MgaSpeech.isSupported()
+      if (!support.supported) {
+        setMessage('Voz no disponible en este telefono.')
+        setListening(false)
+        return
+      }
+      const result = await MgaSpeech.start({ language: 'es-MX', offline: false })
+      const transcript = result.transcript?.trim()
+      if (transcript) {
+        setText((current) => `${current} ${transcript}`.trim())
+        setMessage('Voz capturada. Revisa y aplica.')
+      } else {
+        setMessage('No se detecto voz.')
+      }
+    } catch (error) {
+      if (!voiceCancelRef.current) setMessage(getSpeechErrorMessage(error))
+    } finally {
+      setListening(false)
+    }
   }
 
   return (
