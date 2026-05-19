@@ -1576,11 +1576,23 @@ function App() {
           <Accessibility size={18} />
           <span>Operador</span>
         </button>
-        <div className="role-select user-session-badge" aria-label="Usuario activo">
+        <button
+          className="role-select user-session-badge"
+          aria-label={`Usuario activo: ${currentUser.displayName}`}
+          type="button"
+          onClick={() => {
+            if (canManageUsers(currentUser)) {
+              goToUsers()
+              return
+            }
+            setActionsOpen((open) => !open)
+            setDrawerOpen(false)
+          }}
+        >
           <UserRound size={17} />
           <span>{currentUser.displayName}</span>
           <small>{roleLabel(currentUser.role)}</small>
-        </div>
+        </button>
         <button
           className="chrome-icon"
           aria-expanded={actionsOpen}

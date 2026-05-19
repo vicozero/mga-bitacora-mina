@@ -453,6 +453,11 @@ button:hover,
   color: #243442;
 }
 
+button.role-select:hover {
+  border-color: #008b8f;
+  box-shadow: 0 8px 18px rgba(21, 32, 43, 0.08);
+}
+
 .user-session-badge {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -3207,15 +3212,17 @@ th {
 
   .topbar {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+    grid-template-columns: 42px minmax(0, 1fr) 42px 42px;
     align-items: center;
     gap: 8px;
-    padding: 10px 12px 12px;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 12px;
   }
 
   .topbar .brand {
     grid-column: 2;
     grid-row: 1;
+    min-width: 0;
+    gap: 8px;
   }
 
   .chrome-icon {
@@ -3232,13 +3239,14 @@ th {
   }
 
   .chrome-icon:last-child {
-    grid-column: 6;
+    grid-column: 4;
     grid-row: 1;
   }
 
   .brand img {
-    width: 40px;
-    height: 40px;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
   }
 
   .brand span {
@@ -3246,7 +3254,13 @@ th {
   }
 
   .brand strong {
-    font-size: 17px;
+    display: -webkit-box;
+    max-height: 40px;
+    overflow: hidden;
+    font-size: 16px;
+    line-height: 1.2;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   .mode-tabs {
@@ -3258,80 +3272,46 @@ th {
   }
 
   .sync-button {
-    grid-column: 3;
-    grid-row: 1;
-    min-width: 42px;
-    width: 42px;
-    padding: 0;
-    justify-content: center;
-    background: rgba(255, 255, 255, 0.16);
-    border-color: rgba(255, 255, 255, 0.22);
-    font-size: 0;
-  }
-
-  .review-mode .sync-button {
-    background: #102a34;
-    border-color: #102a34;
-    color: #fff;
-  }
-
-  .sync-button span {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    min-width: 16px;
-    height: 16px;
-    font-size: 10px;
-  }
-
-  .operator-toggle {
-    grid-column: 4;
-    grid-row: 1;
-    width: 42px;
-    min-width: 42px;
-    padding: 0;
-    background: rgba(255, 255, 255, 0.16);
-    border-color: rgba(255, 255, 255, 0.22);
-    color: #fff;
-  }
-
-  .operator-toggle span {
     display: none;
   }
 
-  .review-mode .operator-toggle {
-    background: #fff;
-    border-color: #ccd7df;
-    color: #21313f;
-  }
-
-  .operator-toggle.active,
-  .review-mode .operator-toggle.active {
-    background: #f0b429;
-    border-color: #f0b429;
-    color: #17212b;
+  .operator-toggle {
+    display: none;
   }
 
   .role-select {
-    grid-column: 5;
+    grid-column: 3;
     grid-row: 1;
     justify-content: center;
     width: 42px;
     min-width: 42px;
+    height: 42px;
     padding: 0;
   }
 
-  .role-select select {
-    position: absolute;
-    width: 42px;
-    height: 42px;
-    opacity: 0;
+  .user-session-badge {
+    display: inline-flex;
+    overflow: hidden;
   }
 
   .review-mode .role-select {
     background: #fff;
     border-color: #ccd7df;
     color: #21313f;
+  }
+
+  .user-session-badge svg {
+    grid-row: auto;
+  }
+
+  .user-session-badge span,
+  .user-session-badge small {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .workspace,
