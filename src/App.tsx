@@ -2433,10 +2433,6 @@ function LoginScreen({
             {busy ? 'Validando' : method === 'biometric' ? 'Leer huella' : 'Entrar'}
           </button>
         </form>
-        <div className="login-help">
-          <strong>Primer acceso local</strong>
-          <span>Usuario admin, PIN 1234 o contrasena admin123. Cambialo desde Usuarios.</span>
-        </div>
         {message && <div className="toast login-toast" role="status">{message}</div>}
       </section>
     </main>
@@ -6747,13 +6743,13 @@ function canManageCatalog(user: AppUser | null) {
 function canViewRecord(user: AppUser | null, record: MineRecord) {
   if (!user) return false
   if (user.role === 'administrador' || user.role === 'gerencia') return true
-  return record.createdByUserId === user.id || record.supervisor === user.supervisorName || !record.createdByUserId
+  return record.createdByUserId === user.id || record.supervisor === user.supervisorName
 }
 
 function canEditRecord(user: AppUser | null, record: MineRecord) {
   if (!user || user.role === 'gerencia') return false
   if (user.role === 'administrador') return true
-  const ownsRecord = record.createdByUserId === user.id || record.supervisor === user.supervisorName || !record.createdByUserId
+  const ownsRecord = record.createdByUserId === user.id || record.supervisor === user.supervisorName
   return ownsRecord && record.updatedAt !== record.syncedAt
 }
 

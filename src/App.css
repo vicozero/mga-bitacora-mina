@@ -45,8 +45,7 @@
   border-radius: 8px;
 }
 
-.login-brand span,
-.login-help strong {
+.login-brand span {
   color: #007b83;
   font-size: 12px;
   font-weight: 900;
@@ -81,20 +80,6 @@
   background: #102a34;
   border-color: #102a34;
   color: #fff;
-}
-
-.login-help {
-  display: grid;
-  gap: 4px;
-  padding: 12px;
-  border: 1px solid #dce4eb;
-  border-radius: 8px;
-  background: #f8fbfb;
-}
-
-.login-help span {
-  color: #52616d;
-  font-weight: 800;
 }
 
 .login-toast {
