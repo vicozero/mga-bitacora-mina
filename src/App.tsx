@@ -155,6 +155,8 @@ type DrillRow = {
   horometroDieselFinal: number
   horometroElectInicial: number
   horometroElectFinal: number
+  totalAnclas?: number
+  totalMallas?: number
 }
 
 type BlastRow = {
@@ -421,6 +423,8 @@ type QuickParseResult = {
   metrosPegados?: number
   barrenos?: number
   barrenosCargados?: number
+  totalAnclas?: number
+  totalMallas?: number
   camiones?: number
   diesel?: number
   horas?: number
@@ -554,6 +558,17 @@ const defaultJumbo = jumboEquipoOptions[0] ?? 'JUMBO'
 const defaultScoop = scoopEquipoOptions[0] ?? 'SCOOP TRAM'
 const defaultRetro = retroEquipoOptions[0] ?? 'RETRO'
 
+function isAnchoringJumbo(equipo: string) {
+  const compact = equipo.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  return ['JA04', 'JA004', 'JA07', 'JA007'].some((code) => compact.includes(code))
+}
+
+function drillEquipmentPatch(equipo: string): Partial<DrillRow> {
+  return isAnchoringJumbo(equipo)
+    ? { equipo }
+    : { equipo, totalAnclas: 0, totalMallas: 0 }
+}
+
 const emptyDrillRow = (equipo: string): DrillRow => ({
   equipo,
   operador: '',
@@ -575,6 +590,8 @@ const emptyDrillRow = (equipo: string): DrillRow => ({
   horometroDieselFinal: 0,
   horometroElectInicial: 0,
   horometroElectFinal: 0,
+  totalAnclas: 0,
+  totalMallas: 0,
 })
 
 const emptyBlastRow = (): BlastRow => ({
@@ -3714,19 +3731,26 @@ function BarrenacionAssistantForm({
     const rows = kind === 'maquinaPierna'
       ? (record.maquinaPierna.length ? record.maquinaPierna : [emptyDrillRow(defaultJumbo)])
       : (record.jumbo.length ? record.jumbo : [emptyDrillRow(defaultJumbo)])
-    const nextRows = rows.map((row, index) => index === 0 ? {
-      ...row,
-      equipo: parsed.equipment ?? row.equipo,
-      operador: parsed.operador ?? row.operador,
-      ayudante: parsed.ayudante ?? row.ayudante,
-      nivelObra: parsed.nivelObra ?? row.nivelObra,
-      barrenosDados: parsed.barrenos ?? row.barrenosDados,
-      barrenosCargados: parsed.barrenosCargados ?? row.barrenosCargados,
-      metrosDados: parsed.metros ?? row.metrosDados,
-      horasServicio: parsed.horas ?? row.horasServicio,
-      horometroDieselInicial: parsed.horometroInicial ?? row.horometroDieselInicial,
-      horometroDieselFinal: parsed.horometroFinal ?? row.horometroDieselFinal,
-    } : row)
+    const nextRows = rows.map((row, index) => {
+      if (index !== 0) return row
+      const equipo = parsed.equipment ?? row.equipo
+      const isAnchoring = isAnchoringJumbo(equipo)
+      return {
+        ...row,
+        equipo,
+        operador: parsed.operador ?? row.operador,
+        ayudante: parsed.ayudante ?? row.ayudante,
+        nivelObra: parsed.nivelObra ?? row.nivelObra,
+        barrenosDados: parsed.barrenos ?? row.barrenosDados,
+        barrenosCargados: parsed.barrenosCargados ?? row.barrenosCargados,
+        metrosDados: parsed.metros ?? row.metrosDados,
+        horasServicio: parsed.horas ?? row.horasServicio,
+        horometroDieselInicial: parsed.horometroInicial ?? row.horometroDieselInicial,
+        horometroDieselFinal: parsed.horometroFinal ?? row.horometroDieselFinal,
+        totalAnclas: isAnchoring ? parsed.totalAnclas ?? row.totalAnclas ?? 0 : 0,
+        totalMallas: isAnchoring ? parsed.totalMallas ?? row.totalMallas ?? 0 : 0,
+      }
+    })
     setRecord({
       ...record,
       activeActivity: kind,
@@ -3781,9 +3805,9 @@ function BarrenacionAssistantForm({
                   </div>
                 ) : (
                   <>
-                    <QrScanButton onResult={(value) => updateDrill({ equipo: resolveScannedEquipment(value, drillEquipmentOptions) })} />
+                    <QrScanButton onResult={(value) => updateDrill(drillEquipmentPatch(resolveScannedEquipment(value, drillEquipmentOptions)))} />
                     <div className="form-grid quick">
-                      <Field label="Equipo" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill({ equipo: value })} />
+                      <Field label="Equipo" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill(drillEquipmentPatch(value))} />
                       <Field label="Operador" value={drillRow.operador} suggestions={catalog.operadores} onChange={(value) => updateDrill({ operador: value })} />
                       <Field label="Ayudante" value={drillRow.ayudante} onChange={(value) => updateDrill({ ayudante: value })} />
                       <Field label="Nivel / obra" value={drillRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateDrill({ nivelObra: value })} />
@@ -3814,6 +3838,12 @@ function BarrenacionAssistantForm({
                     <Field label="Horas servicio" type="number" value={drillRow.horasServicio} onChange={(value) => updateDrill({ horasServicio: Number(value) })} />
                     <Field label="Longitud" type="number" value={drillRow.longitud} onChange={(value) => updateDrill({ longitud: Number(value) })} />
                     <Field label="Desarrollo" type="number" value={drillRow.desarrollo} onChange={(value) => updateDrill({ desarrollo: Number(value) })} />
+                    {isAnchoringJumbo(drillRow.equipo) && (
+                      <>
+                        <Field label="Total anclas" type="number" value={drillRow.totalAnclas ?? 0} onChange={(value) => updateDrill({ totalAnclas: Number(value) })} />
+                        <Field label="Total mallas" type="number" value={drillRow.totalMallas ?? 0} onChange={(value) => updateDrill({ totalMallas: Number(value) })} />
+                      </>
+                    )}
                   </div>
                 )}
               </>
@@ -4836,19 +4866,26 @@ function BarrenacionForm({
     const rows = kind === 'maquinaPierna'
       ? (record.maquinaPierna.length ? record.maquinaPierna : [emptyDrillRow(defaultJumbo)])
       : (record.jumbo.length ? record.jumbo : [emptyDrillRow(defaultJumbo)])
-    const nextRows = rows.map((row, index) => index === 0 ? {
-      ...row,
-      equipo: parsed.equipment ?? row.equipo,
-      operador: parsed.operador ?? row.operador,
-      ayudante: parsed.ayudante ?? row.ayudante,
-      nivelObra: parsed.nivelObra ?? row.nivelObra,
-      barrenosDados: parsed.barrenos ?? row.barrenosDados,
-      barrenosCargados: parsed.barrenosCargados ?? row.barrenosCargados,
-      metrosDados: parsed.metros ?? row.metrosDados,
-      horasServicio: parsed.horas ?? row.horasServicio,
-      horometroDieselInicial: parsed.horometroInicial ?? row.horometroDieselInicial,
-      horometroDieselFinal: parsed.horometroFinal ?? row.horometroDieselFinal,
-    } : row)
+    const nextRows = rows.map((row, index) => {
+      if (index !== 0) return row
+      const equipo = parsed.equipment ?? row.equipo
+      const isAnchoring = isAnchoringJumbo(equipo)
+      return {
+        ...row,
+        equipo,
+        operador: parsed.operador ?? row.operador,
+        ayudante: parsed.ayudante ?? row.ayudante,
+        nivelObra: parsed.nivelObra ?? row.nivelObra,
+        barrenosDados: parsed.barrenos ?? row.barrenosDados,
+        barrenosCargados: parsed.barrenosCargados ?? row.barrenosCargados,
+        metrosDados: parsed.metros ?? row.metrosDados,
+        horasServicio: parsed.horas ?? row.horasServicio,
+        horometroDieselInicial: parsed.horometroInicial ?? row.horometroDieselInicial,
+        horometroDieselFinal: parsed.horometroFinal ?? row.horometroDieselFinal,
+        totalAnclas: isAnchoring ? parsed.totalAnclas ?? row.totalAnclas ?? 0 : 0,
+        totalMallas: isAnchoring ? parsed.totalMallas ?? row.totalMallas ?? 0 : 0,
+      }
+    })
     setRecord({
       ...record,
       activeActivity: kind,
@@ -4939,9 +4976,9 @@ function BarrenacionForm({
                   <Trash2 size={16} />
                 </button>
               </div>
-              <QrScanButton onResult={(value) => updateDrill(activity, index, { equipo: resolveScannedEquipment(value, equipmentOptions.jumbo) })} />
+              <QrScanButton onResult={(value) => updateDrill(activity, index, drillEquipmentPatch(resolveScannedEquipment(value, equipmentOptions.jumbo)))} />
               <div className="form-grid quick">
-                <Field label="Equipo" value={row.equipo} options={equipmentOptions.jumbo} onChange={(value) => updateDrill(activity, index, { equipo: value })} />
+                <Field label="Equipo" value={row.equipo} options={equipmentOptions.jumbo} onChange={(value) => updateDrill(activity, index, drillEquipmentPatch(value))} />
                 <Field label="Operador" value={row.operador} suggestions={catalog.operadores} onChange={(value) => updateDrill(activity, index, { operador: value })} />
                 <Field label="Ayudante" value={row.ayudante} onChange={(value) => updateDrill(activity, index, { ayudante: value })} />
                 <Field label="Nivel / obra" value={row.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateDrill(activity, index, { nivelObra: value })} />
@@ -4950,6 +4987,12 @@ function BarrenacionForm({
                 <Field label="Barrenos cargados" type="number" value={row.barrenosCargados} onChange={(value) => updateDrill(activity, index, { barrenosCargados: Number(value) })} />
                 <Field label="Metros dados" type="number" value={row.metrosDados} onChange={(value) => updateDrill(activity, index, { metrosDados: Number(value) })} />
                 <Field label="Horas servicio" type="number" value={row.horasServicio} onChange={(value) => updateDrill(activity, index, { horasServicio: Number(value) })} />
+                {isAnchoringJumbo(row.equipo) && (
+                  <>
+                    <Field label="Total anclas" type="number" value={row.totalAnclas ?? 0} onChange={(value) => updateDrill(activity, index, { totalAnclas: Number(value) })} />
+                    <Field label="Total mallas" type="number" value={row.totalMallas ?? 0} onChange={(value) => updateDrill(activity, index, { totalMallas: Number(value) })} />
+                  </>
+                )}
               </div>
               <details className="quick-details">
                 <summary>Horometros e insumos</summary>
@@ -5496,10 +5539,17 @@ async function buildBarrenacionPdf(record: BarrenacionRecord) {
     record.servicios,
   ]
   activityRows.forEach((value, index) => drawPdfText(page, font, value, 167, activityTop + index * 10, 5.8, 190))
-  drawPdfWrappedText(page, font, record.comentarios, 478, 416, 125, 5.6, 7, 11)
+  drawPdfWrappedText(page, font, mergeNotes(record.comentarios, buildAnchoringNotes(record)), 478, 416, 125, 5.6, 7, 11)
   drawPdfWrappedText(page, font, record.inasistencias, 610, 416, 120, 5.6, 7, 11)
 
   return pdfDoc.save()
+}
+
+function buildAnchoringNotes(record: BarrenacionRecord) {
+  const rows = [...record.jumbo, ...record.maquinaPierna]
+    .filter((row) => isAnchoringJumbo(row.equipo) && (row.totalAnclas || row.totalMallas))
+    .map((row) => `${row.equipo}: ${valueText(row.totalAnclas, true)} anclas / ${valueText(row.totalMallas, true)} mallas`)
+  return rows.length ? `Anclaje y malla: ${rows.join('; ')}` : ''
 }
 
 async function buildRezagadoPdf(record: RezagadoRecord) {
@@ -5599,9 +5649,9 @@ function drawRetroPdfRow(page: PdfPage, font: PdfFont, row: RetroRow, top: numbe
 async function buildBarrenacionExcel(record: BarrenacionRecord) {
   const workbook = createWorkbook()
   const sheet = workbook.addWorksheet('Barrenacion y Voladuras')
-  setupSheet(sheet, [6, 18, 18, 26, 26, 12, 10, 10, 18, 12, 13, 12, 12, 9, 9, 9, 9, 14, 14, 14, 14])
+  setupSheet(sheet, [6, 18, 18, 26, 26, 12, 10, 10, 18, 12, 13, 12, 12, 11, 11, 9, 9, 9, 9, 14, 14, 14, 14])
   await addLogo(workbook, sheet)
-  sheet.mergeCells('C2:P2')
+  sheet.mergeCells('C2:R2')
   sheet.getCell('C2').value = 'Reporte Diario de Barrenacion y Voladuras'
   sheet.getCell('C2').font = { bold: true, size: 14 }
   sheet.getCell('C2').alignment = centerAlign
@@ -5611,7 +5661,7 @@ async function buildBarrenacionExcel(record: BarrenacionRecord) {
   sheet.getCell('F4').value = `Fecha: ${record.fecha}`
   sheet.mergeCells('J4:K4')
   sheet.getCell('J4').value = `Turno: ${record.turno}`
-  sheet.mergeCells('M4:P4')
+  sheet.mergeCells('M4:R4')
   sheet.getCell('M4').value = record.unidad
 
   const drillHeaders = [
@@ -5628,6 +5678,8 @@ async function buildBarrenacionExcel(record: BarrenacionRecord) {
     'Barrenos Cargados',
     'Metros Dados',
     'Hrs Servicio',
+    'Total Anclas',
+    'Total Mallas',
     'Zanco',
     'Cople',
     'Barra',
@@ -5695,7 +5747,7 @@ async function buildBarrenacionExcel(record: BarrenacionRecord) {
   sheet.getCell(`A${handoffRow}`).value = 'PASE DE GUARDIA'
   sheet.mergeCells(`D${handoffRow}:Q${handoffRow + 2}`)
   sheet.getCell(`D${handoffRow}`).value = record.handoffNotes
-  styleUsedCells(sheet, 1, handoffRow + 2, 21)
+  styleUsedCells(sheet, 1, handoffRow + 2, 23)
   return workbook.xlsx.writeBuffer()
 }
 
@@ -5784,6 +5836,8 @@ function addDrillExcelRows(sheet: ExcelJS.Worksheet, startRow: number, area: str
           row.barrenosCargados,
           row.metrosDados,
           row.horasServicio,
+          isAnchoringJumbo(row.equipo) ? row.totalAnclas ?? '' : '',
+          isAnchoringJumbo(row.equipo) ? row.totalMallas ?? '' : '',
           row.zanco,
           row.cople,
           row.barra,
@@ -6434,10 +6488,12 @@ function buildEquipmentTimeline(records: MineRecord[]): EquipmentTimelineItem[] 
   records.forEach((record) => {
     if (record.type === 'barrenacion') {
       record.jumbo.filter((row) => hasDrillData(row) || row.equipo.trim()).forEach((row) => {
-        push(record, 'Jumbo', row.equipo, `${valueText(row.barrenosDados, true)} barrenos | ${valueText(row.metrosDados, true)} m | ${row.nivelObra || 'Sin nivel'}`, row.metrosDados || row.barrenosDados ? 'ready' : 'warning')
+        const anchorText = isAnchoringJumbo(row.equipo) ? ` | ${valueText(row.totalAnclas, true)} anclas | ${valueText(row.totalMallas, true)} mallas` : ''
+        push(record, 'Jumbo', row.equipo, `${valueText(row.barrenosDados, true)} barrenos | ${valueText(row.metrosDados, true)} m${anchorText} | ${row.nivelObra || 'Sin nivel'}`, row.metrosDados || row.barrenosDados || row.totalAnclas || row.totalMallas ? 'ready' : 'warning')
       })
       record.maquinaPierna.filter((row) => hasDrillData(row) || row.equipo.trim()).forEach((row) => {
-        push(record, 'Maquina pierna', row.equipo, `${valueText(row.barrenosDados, true)} barrenos | ${valueText(row.metrosDados, true)} m | ${row.nivelObra || 'Sin nivel'}`, row.metrosDados || row.barrenosDados ? 'ready' : 'warning')
+        const anchorText = isAnchoringJumbo(row.equipo) ? ` | ${valueText(row.totalAnclas, true)} anclas | ${valueText(row.totalMallas, true)} mallas` : ''
+        push(record, 'Maquina pierna', row.equipo, `${valueText(row.barrenosDados, true)} barrenos | ${valueText(row.metrosDados, true)} m${anchorText} | ${row.nivelObra || 'Sin nivel'}`, row.metrosDados || row.barrenosDados || row.totalAnclas || row.totalMallas ? 'ready' : 'warning')
       })
       record.voladuras.filter(hasBlastData).forEach((row) => {
         push(record, 'Voladura', row.obra || row.rpaCfte || 'Frente sin nombre', `${valueText(row.barrenosPegados, true)} barrenos | ${valueText(row.metrosPegados, true)} m`, row.metrosPegados || row.barrenosPegados ? 'ready' : 'warning')
@@ -6490,6 +6546,8 @@ function parseQuickCapture(text: string, options: { equipment: string[]; operado
     metrosPegados: extractNumber(normalized, ['metros pegados', 'pegados']),
     barrenos: extractNumber(normalized, ['barrenos dados', 'barrenos']),
     barrenosCargados: extractNumber(normalized, ['barrenos cargados', 'cargados']),
+    totalAnclas: extractQuantityNumber(normalized, ['total anclas', 'anclas']),
+    totalMallas: extractQuantityNumber(normalized, ['total mallas', 'mallas']),
     camiones: extractNumber(normalized, ['camiones']),
     diesel: extractNumber(normalized, ['diesel', 'litros']),
     horas: extractNumber(normalized, ['horas', 'hrs']),
@@ -6510,10 +6568,25 @@ function normalizePlainText(value: string) {
 }
 
 function findKnownValue(text: string, values: string[]) {
+  const compactText = text.replace(/[^a-z0-9]/g, '')
   const normalizedValues = values
-    .map((value) => ({ value, normalized: normalizePlainText(value) }))
+    .map((value) => {
+      const normalized = normalizePlainText(value)
+      const code = normalizePlainText(value.split(/\s+-\s+|\s+/)[0] ?? '')
+      return {
+        value,
+        normalized,
+        code,
+        compactCode: code.replace(/[^a-z0-9]/g, ''),
+      }
+    })
     .sort((a, b) => b.normalized.length - a.normalized.length)
-  return normalizedValues.find((item) => text.includes(item.normalized) || item.normalized.includes(text))?.value
+  return normalizedValues.find((item) =>
+    text.includes(item.normalized)
+      || item.normalized.includes(text)
+      || Boolean(item.code && text.includes(item.code))
+      || Boolean(item.compactCode && compactText.includes(item.compactCode)),
+  )?.value
 }
 
 function extractPhrase(text: string, labels: string[]) {
@@ -6553,6 +6626,16 @@ function extractNumber(text: string, labels: string[]) {
     const before = text.match(new RegExp(`(\\d+(?:[.,]\\d+)?)\\s*${label}`))
     const after = text.match(new RegExp(`${label}\\s*(?:de)?\\s*(\\d+(?:[.,]\\d+)?)`))
     const value = before?.[1] ?? after?.[1]
+    if (value) return Number(value.replace(',', '.'))
+  }
+  return undefined
+}
+
+function extractQuantityNumber(text: string, labels: string[]) {
+  for (const label of labels) {
+    const after = text.match(new RegExp(`${label}\\s*(?:de)?\\s*(\\d+(?:[.,]\\d+)?)`))
+    const before = text.match(new RegExp(`(\\d+(?:[.,]\\d+)?)\\s*${label}`))
+    const value = after?.[1] ?? before?.[1]
     if (value) return Number(value.replace(',', '.'))
   }
   return undefined
@@ -6705,7 +6788,7 @@ function validateBarrenacionReview(record: BarrenacionRecord, warnings: string[]
     if (!row.nivelObra.trim()) warnings.push(`Barrenacion equipo ${index + 1}: falta nivel/obra.`)
     if (row.horometroDieselFinal > 0 && row.horometroDieselFinal < row.horometroDieselInicial) warnings.push(`Barrenacion equipo ${index + 1}: horometro diesel final menor al inicial.`)
     if (row.horometroElectFinal > 0 && row.horometroElectFinal < row.horometroElectInicial) warnings.push(`Barrenacion equipo ${index + 1}: horometro electrico final menor al inicial.`)
-    if (!row.barrenosDados && !row.barrenosCargados && !row.metrosDados) warnings.push(`Barrenacion equipo ${index + 1}: produccion en cero.`)
+    if (!row.barrenosDados && !row.barrenosCargados && !row.metrosDados && !row.totalAnclas && !row.totalMallas) warnings.push(`Barrenacion equipo ${index + 1}: produccion en cero.`)
   })
   blastRows.forEach((row, index) => {
     if (!row.obra.trim()) warnings.push(`Voladura ${index + 1}: falta obra/frente.`)
@@ -7123,7 +7206,9 @@ function hasDrillData(row: DrillRow) {
       || row.barrenosDados
       || row.barrenosCargados
       || row.metrosDados
-      || row.horasServicio,
+      || row.horasServicio
+      || row.totalAnclas
+      || row.totalMallas,
   )
 }
 

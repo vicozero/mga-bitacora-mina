@@ -3424,22 +3424,22 @@ th {
   }
 
   .assistant-step-layout {
-    grid-template-columns: 86px minmax(0, 1fr);
-    gap: 8px;
-    align-items: start;
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
   .assistant-step-layout .assistant-stepper {
     top: 126px;
-    gap: 7px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
     padding: 6px;
   }
 
   .assistant-step-layout .assistant-stepper button {
     grid-template-columns: 1fr;
     justify-items: center;
-    min-height: 72px;
-    padding: 8px 4px;
+    min-height: 58px;
+    padding: 7px 4px;
     text-align: center;
   }
 
@@ -3450,7 +3450,7 @@ th {
 
   .assistant-step-layout .assistant-stepper button strong {
     max-width: 100%;
-    font-size: 11px;
+    font-size: 10px;
     overflow-wrap: anywhere;
   }
 
