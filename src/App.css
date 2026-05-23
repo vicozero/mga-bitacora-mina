@@ -3554,6 +3554,12 @@ th {
     display: none;
   }
 
+  .login-card .login-submit {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
   .panel-title h1 {
     font-size: 23px;
   }

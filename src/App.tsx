@@ -805,17 +805,17 @@ function App() {
   }, [users])
 
   useEffect(() => {
-    if (!currentUser) return
+    if (!currentUser || editingId) return
     const timeout = window.setTimeout(() => {
-      const supervisor = currentUser.supervisorName || currentUser.displayName
+      const supervisor = getSessionSupervisorName(currentUser)
       setActiveRole(currentUser.role)
-      setTurnoBase((base) => base.supervisor ? base : { ...base, supervisor })
-      setBarrenacion((record) => record.supervisor ? record : { ...record, supervisor })
-      setRezagado((record) => record.supervisor ? record : { ...record, supervisor })
-      setSeguridad((record) => record.supervisor ? record : { ...record, supervisor })
+      setTurnoBase((base) => ({ ...base, supervisor }))
+      setBarrenacion((record) => ({ ...record, supervisor }))
+      setRezagado((record) => ({ ...record, supervisor }))
+      setSeguridad((record) => ({ ...record, supervisor }))
     }, 0)
     return () => window.clearTimeout(timeout)
-  }, [currentUser])
+  }, [currentUser, editingId])
 
   useEffect(() => {
     const draft: CaptureDraft = {
@@ -870,6 +870,19 @@ function App() {
     setUsers(normalized)
     localStorage.setItem(USERS_KEY, JSON.stringify(normalized))
     return normalized
+  }
+
+  function currentSupervisorName() {
+    return currentUser ? getSessionSupervisorName(currentUser) : ''
+  }
+
+  function applySessionSupervisorToForms() {
+    if (!currentUser || editingId) return
+    const supervisor = currentSupervisorName()
+    setTurnoBase((base) => ({ ...base, supervisor }))
+    setBarrenacion((record) => ({ ...record, supervisor }))
+    setRezagado((record) => ({ ...record, supervisor }))
+    setSeguridad((record) => ({ ...record, supervisor }))
   }
 
   async function handleLogin(userId: string, method: AuthMethod, secret?: string) {
@@ -1117,9 +1130,10 @@ function App() {
     if (!currentUser) return
     const source =
       formType === 'barrenacion' ? barrenacion : formType === 'rezagado' ? rezagado : seguridad
+    const supervisor = editingId ? source.supervisor || currentSupervisorName() : currentSupervisorName()
     const updated = stampRecord(normalizeRecord({
       ...source,
-      supervisor: source.supervisor || currentUser.supervisorName || currentUser.displayName,
+      supervisor,
       role: currentUser.role,
       updatedAt: nowIso(),
       deletedAt: undefined,
@@ -1138,7 +1152,7 @@ function App() {
     if (!currentUser) return
     const selectedRecords: MineRecord[] = []
     const updatedAt = nowIso()
-    const baseWithUser = { ...turnoBase, supervisor: turnoBase.supervisor || currentUser.supervisorName || currentUser.displayName }
+    const baseWithUser = { ...turnoBase, supervisor: currentSupervisorName() }
     if (turnoModules.barrenacion) selectedRecords.push(stampRecord(applyShiftBase(barrenacion, baseWithUser, updatedAt, currentUser.role, closeTurno), closeTurno ? 'closed' : 'created', currentUser, deviceId))
     if (turnoModules.rezagado) selectedRecords.push(stampRecord(applyShiftBase(rezagado, baseWithUser, updatedAt, currentUser.role, closeTurno), closeTurno ? 'closed' : 'created', currentUser, deviceId))
     if (turnoModules.seguridad) selectedRecords.push(stampRecord(applyShiftBase(seguridad, baseWithUser, updatedAt, currentUser.role, closeTurno), closeTurno ? 'closed' : 'created', currentUser, deviceId))
@@ -1167,8 +1181,8 @@ function App() {
       seguridad,
     })
     const base = captureMode === 'turno'
-      ? turnoBase
-      : { ...baseDefaults, fecha: new Date().toISOString().slice(0, 10) }
+      ? { ...turnoBase, supervisor: currentSupervisorName() }
+      : { ...baseDefaults, fecha: new Date().toISOString().slice(0, 10), supervisor: currentSupervisorName() }
     const nextBarrenacion = { ...makeBarrenacion(), ...base }
     const nextRezagado = { ...makeRezagado(), ...base }
     const nextSeguridad = { ...makeSeguridad(), ...base }
@@ -1215,17 +1229,19 @@ function App() {
   }
 
   function resetForm(type: RecordType) {
-    if (type === 'barrenacion') setBarrenacion(makeBarrenacion())
-    if (type === 'rezagado') setRezagado(makeRezagado())
-    if (type === 'seguridad') setSeguridad(makeSeguridad())
+    const supervisor = currentSupervisorName()
+    if (type === 'barrenacion') setBarrenacion({ ...makeBarrenacion(), supervisor })
+    if (type === 'rezagado') setRezagado({ ...makeRezagado(), supervisor })
+    if (type === 'seguridad') setSeguridad({ ...makeSeguridad(), supervisor })
   }
 
   function resetTurnoCompleto() {
-    setTurnoBase({ ...baseDefaults, fecha: new Date().toISOString().slice(0, 10) })
+    const supervisor = currentSupervisorName()
+    setTurnoBase({ ...baseDefaults, fecha: new Date().toISOString().slice(0, 10), supervisor })
     setTurnoModules({ ...defaultTurnoModules })
-    setBarrenacion(makeBarrenacion())
-    setRezagado(makeRezagado())
-    setSeguridad(makeSeguridad())
+    setBarrenacion({ ...makeBarrenacion(), supervisor })
+    setRezagado({ ...makeRezagado(), supervisor })
+    setSeguridad({ ...makeSeguridad(), supervisor })
     setTemplateUndo(null)
   }
 
@@ -1278,6 +1294,7 @@ function App() {
       return
     }
     setCaptureMode('modulo')
+    applySessionSupervisorToForms()
     setSection('captura')
     closeMenus()
   }
@@ -1312,6 +1329,7 @@ function App() {
     }
     selectFormType(type)
     setCaptureMode('modulo')
+    applySessionSupervisorToForms()
     setSection('captura')
     closeMenus()
   }
@@ -2357,9 +2375,12 @@ function LoginScreen({
   const [secret, setSecret] = useState('')
   const [busy, setBusy] = useState(false)
   const selectedUser = users.find((user) => user.id === userId) ?? users[0]
+  const hasSecret = secret.trim().length > 0
+  const canSubmit = method === 'biometric' || hasSecret
 
   async function runLogin(nextMethod = method) {
     if (!selectedUser) return
+    if ((nextMethod === 'pin' || nextMethod === 'password') && !secret.trim()) return
     setBusy(true)
     try {
       const ok = await onLogin(selectedUser.id, nextMethod, nextMethod === 'biometric' ? undefined : secret)
@@ -2428,10 +2449,12 @@ function LoginScreen({
               />
             </label>
           )}
-          <button className="primary-action" type="submit" disabled={busy || !selectedUser}>
-            {method === 'biometric' ? <Fingerprint size={18} /> : <KeyRound size={18} />}
-            {busy ? 'Validando' : method === 'biometric' ? 'Leer huella' : 'Entrar'}
-          </button>
+          {canSubmit && (
+            <button className="primary-action login-submit" type="submit" disabled={busy || !selectedUser}>
+              {method === 'biometric' ? <Fingerprint size={18} /> : <KeyRound size={18} />}
+              {busy ? 'Validando' : method === 'biometric' ? 'Leer huella' : 'Iniciar'}
+            </button>
+          )}
         </form>
         {message && <div className="toast login-toast" role="status">{message}</div>}
       </section>
@@ -6738,6 +6761,10 @@ function canManageUsers(user: AppUser | null) {
 
 function canManageCatalog(user: AppUser | null) {
   return Boolean(user && user.role === 'administrador')
+}
+
+function getSessionSupervisorName(user: AppUser) {
+  return user.supervisorName || user.displayName
 }
 
 function canViewRecord(user: AppUser | null, record: MineRecord) {
