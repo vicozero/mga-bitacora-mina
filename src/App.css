@@ -2499,6 +2499,13 @@ textarea:focus {
   font-size: 18px;
 }
 
+.section-heading p {
+  margin: 4px 0 0;
+  color: #647180;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .row-card {
   min-width: 0;
   padding: 16px;
@@ -2936,6 +2943,51 @@ textarea:focus {
   margin: 0;
   color: #647180;
   font-weight: 800;
+}
+
+.supervisor-dashboard {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.supervisor-dashboard > p {
+  margin: 0;
+  color: #647180;
+  font-weight: 800;
+}
+
+.supervisor-table-wrap {
+  overflow-x: auto;
+}
+
+.supervisor-table {
+  min-width: 980px;
+  margin-top: 0;
+}
+
+.supervisor-table th {
+  color: #516170;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.supervisor-table td {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.supervisor-table td:first-child {
+  min-width: 190px;
+}
+
+.supervisor-table strong {
+  color: #142531;
+  overflow-wrap: anywhere;
 }
 
 .equipment-grid {

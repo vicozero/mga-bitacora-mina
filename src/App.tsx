@@ -402,6 +402,22 @@ type EquipmentSummary = {
   horas: number
 }
 
+type SupervisorSummary = {
+  supervisor: string
+  registros: number
+  barrenacion: number
+  rezagado: number
+  seguridad: number
+  metrosDados: number
+  metrosPegados: number
+  cucharones: number
+  accidentes: number
+  incidentes: number
+  fuerzaLaboral: number
+  pendientes: number
+  ultimaCaptura: string
+}
+
 type EquipmentTimelineItem = {
   key: string
   equipo: string
@@ -766,6 +782,8 @@ function App() {
     )
   }, [visibleRecords, query])
   const kpis = useMemo(() => computeKpis(filtered), [filtered])
+  const reviewKpis = useMemo(() => computeKpis(visibleRecords), [visibleRecords])
+  const supervisorSummary = useMemo(() => buildSupervisorSummary(visibleRecords), [visibleRecords])
   const recordCounts = useMemo(
     () => ({
       barrenacion: visibleRecords.filter((record) => record.type === 'barrenacion').length,
@@ -792,8 +810,8 @@ function App() {
     scoop: mergeCatalogList(catalog.scoop, scoopEquipoOptions),
     retro: mergeCatalogList(catalog.retro, retroEquipoOptions),
   }), [catalog])
-  const equipmentSummary = useMemo(() => buildEquipmentSummary(filtered), [filtered])
-  const equipmentTimeline = useMemo(() => buildEquipmentTimeline(filtered), [filtered])
+  const equipmentSummary = useMemo(() => buildEquipmentSummary(visibleRecords), [visibleRecords])
+  const equipmentTimeline = useMemo(() => buildEquipmentTimeline(visibleRecords), [visibleRecords])
   const hasTurnoDraft = captureMode === 'turno' && hasTurnoDraftContent(turnoBase, turnoModules, barrenacion, rezagado, seguridad)
   const captureReview = useMemo(
     () => buildCaptureReview(captureMode, formType, turnoBase, turnoModules, barrenacion, rezagado, seguridad, editingId),
@@ -2117,7 +2135,11 @@ function App() {
           <div className="dashboard-tools">
             <div>
               <h1>Revision y KPI</h1>
-              <p>Panel local o web Render para consolidar registros sincronizados.</p>
+              <p>
+                {canReviewGlobal(currentUser)
+                  ? 'Vista administrativa global: revisa capturas de todos los supervisores sincronizados.'
+                  : 'Panel local o web Render para consolidar tus registros sincronizados.'}
+              </p>
             </div>
             <div className="tool-actions">
               <input
@@ -2167,41 +2189,43 @@ function App() {
               <div>
                 <span>MGA CONTRATISTA MINERA S.A. DE C.V.</span>
                 <strong>Reporte ejecutivo de operaciones mina</strong>
+                <small>{canReviewGlobal(currentUser) ? 'KPI global administrativo' : 'KPI de supervisor'}</small>
               </div>
               <small>{new Date().toLocaleDateString('es-MX')}</small>
             </div>
 
             <div className="kpi-grid">
-              <Kpi icon={<History />} label="Registros" value={kpis.total} />
-              <Kpi icon={<BarChart3 />} label="Metros barrenados" value={kpis.metrosDados} />
-              <Kpi icon={<Activity />} label="Metros pegados" value={kpis.metrosPegados} />
-              <Kpi icon={<HardHat />} label="Cucharones rezagado" value={kpis.rezagado} />
-              <Kpi icon={<ShieldCheck />} label="Accidentes / Incidentes" value={`${kpis.accidentes} / ${kpis.incidentes}`} />
-              <Kpi icon={<ClipboardCheck />} label="Fuerza laboral" value={kpis.fuerzaLaboral} />
+              <Kpi icon={<History />} label="Registros globales" value={reviewKpis.total} />
+              <Kpi icon={<Users />} label="Supervisores" value={supervisorSummary.length} />
+              <Kpi icon={<BarChart3 />} label="Metros barrenados" value={reviewKpis.metrosDados} />
+              <Kpi icon={<Activity />} label="Metros pegados" value={reviewKpis.metrosPegados} />
+              <Kpi icon={<HardHat />} label="Cucharones rezagado" value={reviewKpis.rezagado} />
+              <Kpi icon={<ShieldCheck />} label="Accidentes / Incidentes" value={`${reviewKpis.accidentes} / ${reviewKpis.incidentes}`} />
             </div>
 
             <div className="summary-grid">
               <section>
                 <h2>Produccion</h2>
-                <Metric label="Barrenos dados" value={kpis.barrenosDados} />
-                <Metric label="Barrenos cargados" value={kpis.barrenosCargados} />
-                <Metric label="Camiones" value={kpis.camiones} />
-                <Metric label="Diesel" value={kpis.diesel} />
+                <Metric label="Barrenos dados" value={reviewKpis.barrenosDados} />
+                <Metric label="Barrenos cargados" value={reviewKpis.barrenosCargados} />
+                <Metric label="Camiones" value={reviewKpis.camiones} />
+                <Metric label="Diesel" value={reviewKpis.diesel} />
               </section>
               <section>
                 <h2>Seguridad</h2>
-                <Metric label="Accidentes" value={kpis.accidentes} />
-                <Metric label="Incidentes" value={kpis.incidentes} />
-                <Metric label="Reportes de seguridad" value={kpis.seguridad} />
-                <Metric label="Personas registradas" value={kpis.fuerzaLaboral} />
+                <Metric label="Accidentes" value={reviewKpis.accidentes} />
+                <Metric label="Incidentes" value={reviewKpis.incidentes} />
+                <Metric label="Reportes de seguridad" value={reviewKpis.seguridad} />
+                <Metric label="Personas registradas" value={reviewKpis.fuerzaLaboral} />
               </section>
             </div>
 
+            <SupervisorDashboard rows={supervisorSummary} globalReview={canReviewGlobal(currentUser)} />
             <EquipmentDashboard rows={equipmentSummary} />
             <EquipmentTimeline rows={equipmentTimeline} />
 
             <div className="records-table">
-              <h2>Registros capturados</h2>
+              <h2>Registros capturados {query.trim() ? `(${filtered.length} filtrados)` : `(${visibleRecords.length})`}</h2>
               <table>
                 <thead>
                   <tr>
@@ -2209,6 +2233,7 @@ function App() {
                     <th>Turno</th>
                     <th>Tipo</th>
                     <th>Supervisor</th>
+                    <th>Usuario</th>
                     <th>Unidad</th>
                     <th>Estado</th>
                     <th data-html2canvas-ignore="true">Acciones</th>
@@ -2221,6 +2246,7 @@ function App() {
                       <td>{record.turno}</td>
                       <td>{labelType(record.type)}</td>
                       <td>{record.supervisor || 'Pendiente'}</td>
+                      <td>{record.createdByName || record.updatedByName || 'Sin usuario'}</td>
                       <td>{record.unidad}</td>
                       <td>
                         <span className={record.updatedAt === record.syncedAt ? 'status-pill synced' : 'status-pill'}>
@@ -5549,6 +5575,59 @@ function EquipmentDashboard({ rows }: { rows: EquipmentSummary[] }) {
   )
 }
 
+function SupervisorDashboard({ rows, globalReview }: { rows: SupervisorSummary[]; globalReview: boolean }) {
+  return (
+    <section className="supervisor-dashboard">
+      <div className="section-heading">
+        <div>
+          <h2>Capturas por supervisor</h2>
+          <p>{globalReview ? 'Consolidado de todos los supervisores sincronizados en Render.' : 'Consolidado de tus capturas sincronizadas.'}</p>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <p>Sin capturas sincronizadas para revisar.</p>
+      ) : (
+        <div className="supervisor-table-wrap">
+          <table className="supervisor-table">
+            <thead>
+              <tr>
+                <th>Supervisor</th>
+                <th>Reg.</th>
+                <th>Barrenacion</th>
+                <th>Rezagado</th>
+                <th>Seguridad</th>
+                <th>Metros</th>
+                <th>Pegados</th>
+                <th>Cucharones</th>
+                <th>Acc. / Inc.</th>
+                <th>Pendientes</th>
+                <th>Ultima captura</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.supervisor}>
+                  <td><strong>{row.supervisor}</strong></td>
+                  <td>{row.registros}</td>
+                  <td>{row.barrenacion}</td>
+                  <td>{row.rezagado}</td>
+                  <td>{row.seguridad}</td>
+                  <td>{row.metrosDados}</td>
+                  <td>{row.metrosPegados}</td>
+                  <td>{row.cucharones}</td>
+                  <td>{row.accidentes} / {row.incidentes}</td>
+                  <td>{row.pendientes}</td>
+                  <td>{row.ultimaCaptura ? formatDateTime(row.ultimaCaptura) : 'Sin fecha'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function EquipmentTimeline({ rows }: { rows: EquipmentTimelineItem[] }) {
   return (
     <section className="equipment-timeline">
@@ -6532,6 +6611,60 @@ function buildEquipmentSummary(records: MineRecord[]): EquipmentSummary[] {
   })
 }
 
+function buildSupervisorSummary(records: MineRecord[]): SupervisorSummary[] {
+  const map = new Map<string, SupervisorSummary>()
+
+  function getSummary(record: MineRecord) {
+    const supervisor = record.supervisor?.trim() || record.createdByName?.trim() || 'Supervisor pendiente'
+    const key = supervisor.toLowerCase()
+    const current = map.get(key)
+    if (current) return current
+    const next: SupervisorSummary = {
+      supervisor,
+      registros: 0,
+      barrenacion: 0,
+      rezagado: 0,
+      seguridad: 0,
+      metrosDados: 0,
+      metrosPegados: 0,
+      cucharones: 0,
+      accidentes: 0,
+      incidentes: 0,
+      fuerzaLaboral: 0,
+      pendientes: 0,
+      ultimaCaptura: '',
+    }
+    map.set(key, next)
+    return next
+  }
+
+  records.forEach((record) => {
+    const item = getSummary(record)
+    const kpi = computeKpis([record])
+    item.registros += 1
+    if (record.type === 'barrenacion') item.barrenacion += 1
+    if (record.type === 'rezagado') item.rezagado += 1
+    if (record.type === 'seguridad') item.seguridad += 1
+    item.metrosDados += kpi.metrosDados
+    item.metrosPegados += kpi.metrosPegados
+    item.cucharones += kpi.rezagado
+    item.accidentes += kpi.accidentes
+    item.incidentes += kpi.incidentes
+    item.fuerzaLaboral += kpi.fuerzaLaboral
+    if (record.updatedAt !== record.syncedAt) item.pendientes += 1
+    const last = record.updatedAt || record.createdAt
+    if (last && (!item.ultimaCaptura || new Date(last).getTime() > new Date(item.ultimaCaptura).getTime())) {
+      item.ultimaCaptura = last
+    }
+  })
+
+  return Array.from(map.values()).sort((a, b) =>
+    b.registros - a.registros
+      || new Date(b.ultimaCaptura || 0).getTime() - new Date(a.ultimaCaptura || 0).getTime()
+      || a.supervisor.localeCompare(b.supervisor),
+  )
+}
+
 function buildEquipmentTimeline(records: MineRecord[]): EquipmentTimelineItem[] {
   const items: EquipmentTimelineItem[] = []
   function push(record: MineRecord, tipo: string, equipo: string, resumen: string, status: ReviewInsightStatus = 'ready') {
@@ -7046,6 +7179,10 @@ function canManageCatalog(user: AppUser | null) {
   return Boolean(user && user.role === 'administrador')
 }
 
+function canReviewGlobal(user: AppUser | null) {
+  return Boolean(user && (user.role === 'administrador' || user.role === 'gerencia'))
+}
+
 function getSessionSupervisorName(user: AppUser) {
   return user.supervisorName || user.displayName
 }
@@ -7053,13 +7190,13 @@ function getSessionSupervisorName(user: AppUser) {
 function canViewRecord(user: AppUser | null, record: MineRecord) {
   if (!user) return false
   if (user.role === 'administrador' || user.role === 'gerencia') return true
-  return record.createdByUserId === user.id || record.supervisor === user.supervisorName
+  return record.createdByUserId === user.id || record.supervisor === getSessionSupervisorName(user)
 }
 
 function canEditRecord(user: AppUser | null, record: MineRecord) {
   if (!user || user.role === 'gerencia') return false
   if (user.role === 'administrador') return true
-  const ownsRecord = record.createdByUserId === user.id || record.supervisor === user.supervisorName
+  const ownsRecord = record.createdByUserId === user.id || record.supervisor === getSessionSupervisorName(user)
   return ownsRecord && record.updatedAt !== record.syncedAt
 }
 
