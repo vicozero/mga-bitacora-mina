@@ -1978,14 +1978,21 @@ function App() {
                 setSeguridad={setSeguridad}
               />
             ) : (
-              <>
-                <CaptureFlowNav formType={formType} />
-                {formType === 'barrenacion' && (
-                  <BarrenacionForm catalog={catalog} equipmentOptions={equipmentOptions} record={barrenacion} setRecord={setBarrenacion} />
-                )}
-                {formType === 'rezagado' && <RezagadoForm catalog={catalog} equipmentOptions={equipmentOptions} record={rezagado} setRecord={setRezagado} />}
-                {formType === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} />}
-              </>
+              <ModuleCaptureWorkbench
+                barrenacion={barrenacion}
+                captureLayout={captureLayout}
+                catalog={catalog}
+                equipmentFavorites={equipmentFavorites}
+                equipmentOptions={equipmentOptions}
+                formType={formType}
+                onSelectFormType={selectFormType}
+                rezagado={rezagado}
+                seguridad={seguridad}
+                setBarrenacion={setBarrenacion}
+                setCaptureLayout={setCaptureLayout}
+                setRezagado={setRezagado}
+                setSeguridad={setSeguridad}
+              />
             )}
           </section>
         </form>
@@ -2982,6 +2989,108 @@ function scrollToCaptureSection(target: string) {
   document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+function ModuleCaptureWorkbench({
+  barrenacion,
+  captureLayout,
+  catalog,
+  equipmentFavorites,
+  equipmentOptions,
+  formType,
+  onSelectFormType,
+  rezagado,
+  seguridad,
+  setBarrenacion,
+  setCaptureLayout,
+  setRezagado,
+  setSeguridad,
+}: {
+  barrenacion: BarrenacionRecord
+  captureLayout: CaptureLayout
+  catalog: CatalogState
+  equipmentFavorites: EquipmentFavorites
+  equipmentOptions: EquipmentOptions
+  formType: RecordType
+  onSelectFormType: (type: RecordType) => void
+  rezagado: RezagadoRecord
+  seguridad: SeguridadRecord
+  setBarrenacion: (record: BarrenacionRecord) => void
+  setCaptureLayout: (layout: CaptureLayout) => void
+  setRezagado: (record: RezagadoRecord) => void
+  setSeguridad: (record: SeguridadRecord) => void
+}) {
+  const title = formType === 'barrenacion'
+    ? 'Barrenacion y voladuras'
+    : formType === 'rezagado'
+      ? 'Rezagado'
+      : 'Seguridad'
+  const subtitle = captureLayout === 'asistente'
+    ? 'Captura por pasos, sin formulario largo'
+    : 'Formulario completo disponible para datos especiales'
+
+  return (
+    <div className="module-capture-workbench">
+      <PanelTitle title={title} subtitle={subtitle} />
+      <div className="capture-layout-tabs" aria-label="Modo de captura">
+        <button className={captureLayout === 'asistente' ? 'active' : ''} type="button" onClick={() => setCaptureLayout('asistente')}>
+          <ClipboardCheck size={17} /> Asistente por pasos
+        </button>
+        <button className={captureLayout === 'formulario' ? 'active' : ''} type="button" onClick={() => setCaptureLayout('formulario')}>
+          <FileSpreadsheet size={17} /> Formulario completo
+        </button>
+      </div>
+      <div className="module-inline-tabs" aria-label="Modulo de captura">
+        <button className={formType === 'barrenacion' ? 'active' : ''} type="button" onClick={() => onSelectFormType('barrenacion')}>
+          <Drill size={17} /> Barrenacion
+        </button>
+        <button className={formType === 'rezagado' ? 'active' : ''} type="button" onClick={() => onSelectFormType('rezagado')}>
+          <Truck size={17} /> Rezagado
+        </button>
+        <button className={formType === 'seguridad' ? 'active' : ''} type="button" onClick={() => onSelectFormType('seguridad')}>
+          <ShieldCheck size={17} /> Seguridad
+        </button>
+      </div>
+
+      {captureLayout === 'asistente' ? (
+        <>
+          <QuickSection title="Turno" icon={<Mountain size={18} />} anchorId="capture-turno">
+            {formType === 'barrenacion' && <BaseFields record={barrenacion} setRecord={setBarrenacion} />}
+            {formType === 'rezagado' && <BaseFields record={rezagado} setRecord={setRezagado} />}
+            {formType === 'seguridad' && <BaseFields record={seguridad} setRecord={setSeguridad} />}
+          </QuickSection>
+          {formType === 'barrenacion' && (
+            <BarrenacionAssistantForm
+              catalog={catalog}
+              equipmentFavorites={equipmentFavorites}
+              equipmentOptions={equipmentOptions}
+              record={barrenacion}
+              setRecord={setBarrenacion}
+            />
+          )}
+          {formType === 'rezagado' && (
+            <RezagadoAssistantForm
+              catalog={catalog}
+              equipmentFavorites={equipmentFavorites}
+              equipmentOptions={equipmentOptions}
+              record={rezagado}
+              setRecord={setRezagado}
+            />
+          )}
+          {formType === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} showBaseFields={false} />}
+        </>
+      ) : (
+        <>
+          <CaptureFlowNav formType={formType} />
+          {formType === 'barrenacion' && (
+            <BarrenacionForm catalog={catalog} equipmentOptions={equipmentOptions} record={barrenacion} setRecord={setBarrenacion} />
+          )}
+          {formType === 'rezagado' && <RezagadoForm catalog={catalog} equipmentOptions={equipmentOptions} record={rezagado} setRecord={setRezagado} />}
+          {formType === 'seguridad' && <SeguridadForm record={seguridad} setRecord={setSeguridad} />}
+        </>
+      )}
+    </div>
+  )
+}
+
 function MessageCenter({
   chatAuthor,
   chatText,
@@ -3634,125 +3743,129 @@ function BarrenacionAssistantForm({
         placeholder="Ej. JL-019 operador Juan nivel 10300 12 barrenos 36 metros"
         onApply={applyQuickCapture}
       />
-      <AssistantStepNav steps={steps} active={step} onChange={setStep} />
+      <div className="assistant-step-layout">
+        <AssistantStepNav steps={steps} active={step} onChange={setStep} />
 
-      <section className="assistant-focus-card">
-        {step === 'actividad' && (
-          <>
-            <AssistantFocusTitle title="Selecciona el trabajo" meta="El asistente mostrara solo los campos necesarios para ese trabajo." />
-            <div className="quick-choice-grid three">
-              <ChoiceButton active={activity === 'jumbo'} icon={<Drill size={21} />} label="Jumbo" meta={`${record.jumbo.length || 1} registros`} onClick={() => selectActivity('jumbo')} />
-              <ChoiceButton active={activity === 'maquinaPierna'} icon={<HardHat size={21} />} label="Maquina pierna" meta={`${record.maquinaPierna.length || 1} registros`} onClick={() => selectActivity('maquinaPierna')} />
-              <ChoiceButton active={activity === 'voladura'} icon={<Activity size={21} />} label="Voladura" meta={`${record.voladuras.length || 1} registros`} onClick={() => selectActivity('voladura')} />
-            </div>
-          </>
-        )}
-
-        {step === 'equipo' && (
-          <>
-            <AssistantFocusTitle title={isBlast ? 'Frente de voladura' : 'Equipo y personal'} meta={`${shortBarrenacionActivityLabel(activity)} ${safeIndex + 1} de ${rowCount}`} />
-            <AssistantRowTools
-              addLabel={isBlast ? 'Agregar voladura' : 'Agregar equipo'}
-              count={rowCount}
-              index={safeIndex}
-              label={isBlast ? 'Voladura' : shortBarrenacionActivityLabel(activity)}
-              onAdd={addCurrentRow}
-              onDuplicate={duplicateCurrentRow}
-              onRemove={removeCurrentRow}
-              onSelect={setRowIndex}
-            />
-            {isBlast ? (
-              <div className="form-grid quick">
-                <Field label="Obra / frente" value={blastRow.obra} onChange={(value) => updateBlast({ obra: value })} />
-                <Field label="Oficial" value={blastRow.oficial} onChange={(value) => updateBlast({ oficial: value })} />
-                <Field label="Ayudante" value={blastRow.ayudante} onChange={(value) => updateBlast({ ayudante: value })} />
-                <Field label="RPA / Cfte" value={blastRow.rpaCfte} onChange={(value) => updateBlast({ rpaCfte: value })} />
-              </div>
-            ) : (
+        <div className="assistant-step-body">
+          <section className="assistant-focus-card">
+            {step === 'actividad' && (
               <>
-                <QrScanButton onResult={(value) => updateDrill({ equipo: resolveScannedEquipment(value, drillEquipmentOptions) })} />
-                <div className="form-grid quick">
-                  <Field label="Equipo" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill({ equipo: value })} />
-                <Field label="Operador" value={drillRow.operador} suggestions={catalog.operadores} onChange={(value) => updateDrill({ operador: value })} />
-                <Field label="Ayudante" value={drillRow.ayudante} onChange={(value) => updateDrill({ ayudante: value })} />
-                <Field label="Nivel / obra" value={drillRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateDrill({ nivelObra: value })} />
-                <Field label="RPA / Cfte" value={drillRow.rpaCfte} onChange={(value) => updateDrill({ rpaCfte: value })} />
-              </div>
+                <AssistantFocusTitle title="Selecciona el trabajo" meta="El asistente mostrara solo los campos necesarios para ese trabajo." />
+                <div className="quick-choice-grid three">
+                  <ChoiceButton active={activity === 'jumbo'} icon={<Drill size={21} />} label="Jumbo" meta={`${record.jumbo.length || 1} registros`} onClick={() => selectActivity('jumbo')} />
+                  <ChoiceButton active={activity === 'maquinaPierna'} icon={<HardHat size={21} />} label="Maquina pierna" meta={`${record.maquinaPierna.length || 1} registros`} onClick={() => selectActivity('maquinaPierna')} />
+                  <ChoiceButton active={activity === 'voladura'} icon={<Activity size={21} />} label="Voladura" meta={`${record.voladuras.length || 1} registros`} onClick={() => selectActivity('voladura')} />
+                </div>
               </>
             )}
-          </>
-        )}
 
-        {step === 'produccion' && (
-          <>
-            <AssistantFocusTitle title="Produccion del turno" meta={isBlast ? 'Barrenos y metros pegados' : 'Barrenos, metros y horas'} />
-            {isBlast ? (
-              <div className="form-grid quick">
-                <Field label="Barrenos pegados" type="number" value={blastRow.barrenosPegados} onChange={(value) => updateBlast({ barrenosPegados: Number(value) })} />
-                <Field label="Metros pegados" type="number" value={blastRow.metrosPegados} onChange={(value) => updateBlast({ metrosPegados: Number(value) })} />
-                <Field label="Horas servicio" type="number" value={blastRow.horasServicio} onChange={(value) => updateBlast({ horasServicio: Number(value) })} />
-                <Field label="Longitud" type="number" value={blastRow.longitud} onChange={(value) => updateBlast({ longitud: Number(value) })} />
-                <Field label="Cuele" type="number" value={blastRow.cuele} onChange={(value) => updateBlast({ cuele: Number(value) })} />
-                <Field label="Desarrollo" type="number" value={blastRow.desarrollo} onChange={(value) => updateBlast({ desarrollo: Number(value) })} />
-              </div>
-            ) : (
-              <div className="form-grid quick">
-                <Field label="Barrenos dados" type="number" value={drillRow.barrenosDados} onChange={(value) => updateDrill({ barrenosDados: Number(value) })} />
-                <Field label="Barrenos cargados" type="number" value={drillRow.barrenosCargados} onChange={(value) => updateDrill({ barrenosCargados: Number(value) })} />
-                <Field label="Metros dados" type="number" value={drillRow.metrosDados} onChange={(value) => updateDrill({ metrosDados: Number(value) })} />
-                <Field label="Horas servicio" type="number" value={drillRow.horasServicio} onChange={(value) => updateDrill({ horasServicio: Number(value) })} />
-                <Field label="Longitud" type="number" value={drillRow.longitud} onChange={(value) => updateDrill({ longitud: Number(value) })} />
-                <Field label="Desarrollo" type="number" value={drillRow.desarrollo} onChange={(value) => updateDrill({ desarrollo: Number(value) })} />
-              </div>
-            )}
-          </>
-        )}
-
-        {step === 'detalles' && (
-          <>
-            <AssistantFocusTitle title="Cierre y datos opcionales" meta="Captura solo lo que aplique; lo demas sigue disponible en Formulario completo." />
-            {isBlast ? (
+            {step === 'equipo' && (
               <>
-                <div className="form-grid quick">
-                  <Field label="ANFO inicial" type="number" value={blastRow.anfoInicial} onChange={(value) => updateBlast({ anfoInicial: Number(value) })} />
-                  <Field label="ANFO final" type="number" value={blastRow.anfoFinal} onChange={(value) => updateBlast({ anfoFinal: Number(value) })} />
-                </div>
-                <TextArea label="Observaciones de voladura" value={blastRow.observaciones} onChange={(value) => updateBlast({ observaciones: value })} />
+                <AssistantFocusTitle title={isBlast ? 'Frente de voladura' : 'Equipo y personal'} meta={`${shortBarrenacionActivityLabel(activity)} ${safeIndex + 1} de ${rowCount}`} />
+                <AssistantRowTools
+                  addLabel={isBlast ? 'Agregar voladura' : 'Agregar equipo'}
+                  count={rowCount}
+                  index={safeIndex}
+                  label={isBlast ? 'Voladura' : shortBarrenacionActivityLabel(activity)}
+                  onAdd={addCurrentRow}
+                  onDuplicate={duplicateCurrentRow}
+                  onRemove={removeCurrentRow}
+                  onSelect={setRowIndex}
+                />
+                {isBlast ? (
+                  <div className="form-grid quick">
+                    <Field label="Obra / frente" value={blastRow.obra} onChange={(value) => updateBlast({ obra: value })} />
+                    <Field label="Oficial" value={blastRow.oficial} onChange={(value) => updateBlast({ oficial: value })} />
+                    <Field label="Ayudante" value={blastRow.ayudante} onChange={(value) => updateBlast({ ayudante: value })} />
+                    <Field label="RPA / Cfte" value={blastRow.rpaCfte} onChange={(value) => updateBlast({ rpaCfte: value })} />
+                  </div>
+                ) : (
+                  <>
+                    <QrScanButton onResult={(value) => updateDrill({ equipo: resolveScannedEquipment(value, drillEquipmentOptions) })} />
+                    <div className="form-grid quick">
+                      <Field label="Equipo" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill({ equipo: value })} />
+                      <Field label="Operador" value={drillRow.operador} suggestions={catalog.operadores} onChange={(value) => updateDrill({ operador: value })} />
+                      <Field label="Ayudante" value={drillRow.ayudante} onChange={(value) => updateDrill({ ayudante: value })} />
+                      <Field label="Nivel / obra" value={drillRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateDrill({ nivelObra: value })} />
+                      <Field label="RPA / Cfte" value={drillRow.rpaCfte} onChange={(value) => updateDrill({ rpaCfte: value })} />
+                    </div>
+                  </>
+                )}
               </>
-            ) : (
-              <details className="quick-details assistant-details">
-                <summary>Horometros e insumos</summary>
-                <div className="form-grid quick">
-                  <Field label="Hor. diesel inicial" type="number" value={drillRow.horometroDieselInicial} onChange={(value) => updateDrill({ horometroDieselInicial: Number(value) })} />
-                  <Field label="Hor. diesel final" type="number" value={drillRow.horometroDieselFinal} onChange={(value) => updateDrill({ horometroDieselFinal: Number(value) })} />
-                  <Field label="Hor. elect inicial" type="number" value={drillRow.horometroElectInicial} onChange={(value) => updateDrill({ horometroElectInicial: Number(value) })} />
-                  <Field label="Hor. elect final" type="number" value={drillRow.horometroElectFinal} onChange={(value) => updateDrill({ horometroElectFinal: Number(value) })} />
-                  <Field label="Zanco" type="number" value={drillRow.zanco} onChange={(value) => updateDrill({ zanco: Number(value) })} />
-                  <Field label="Cople" type="number" value={drillRow.cople} onChange={(value) => updateDrill({ cople: Number(value) })} />
-                  <Field label="Barra" type="number" value={drillRow.barra} onChange={(value) => updateDrill({ barra: Number(value) })} />
-                  <Field label="Broca" type="number" value={drillRow.broca} onChange={(value) => updateDrill({ broca: Number(value) })} />
-                </div>
-              </details>
             )}
-            <details className="quick-details assistant-details">
-              <summary>Apoyo del turno</summary>
-              <div className="form-grid quick">
-                <Field label="Polvorero" value={record.polvorero} onChange={(value) => setRecord({ ...record, polvorero: value })} />
-                <Field label="Chofer camion personal" value={record.choferCamion} onChange={(value) => setRecord({ ...record, choferCamion: value })} />
-                <Field label="Chofer pipa" value={record.choferPipa} onChange={(value) => setRecord({ ...record, choferPipa: value })} />
-                <Field label="Bob cat" value={record.bobCat} onChange={(value) => setRecord({ ...record, bobCat: value })} />
-                <Field label="Bombeo" value={record.bombeo} onChange={(value) => setRecord({ ...record, bombeo: value })} />
-                <Field label="Servicios" value={record.servicios} onChange={(value) => setRecord({ ...record, servicios: value })} />
-              </div>
-            </details>
-            <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
-            <TextArea label="Inasistencias / permisos" value={record.inasistencias} onChange={(value) => setRecord({ ...record, inasistencias: value })} />
-            <RecordExtrasPanel record={record} setRecord={setRecord} />
-          </>
-        )}
-      </section>
 
-      <AssistantStepActions steps={steps} active={step} onChange={setStep} />
+            {step === 'produccion' && (
+              <>
+                <AssistantFocusTitle title="Produccion del turno" meta={isBlast ? 'Barrenos y metros pegados' : 'Barrenos, metros y horas'} />
+                {isBlast ? (
+                  <div className="form-grid quick">
+                    <Field label="Barrenos pegados" type="number" value={blastRow.barrenosPegados} onChange={(value) => updateBlast({ barrenosPegados: Number(value) })} />
+                    <Field label="Metros pegados" type="number" value={blastRow.metrosPegados} onChange={(value) => updateBlast({ metrosPegados: Number(value) })} />
+                    <Field label="Horas servicio" type="number" value={blastRow.horasServicio} onChange={(value) => updateBlast({ horasServicio: Number(value) })} />
+                    <Field label="Longitud" type="number" value={blastRow.longitud} onChange={(value) => updateBlast({ longitud: Number(value) })} />
+                    <Field label="Cuele" type="number" value={blastRow.cuele} onChange={(value) => updateBlast({ cuele: Number(value) })} />
+                    <Field label="Desarrollo" type="number" value={blastRow.desarrollo} onChange={(value) => updateBlast({ desarrollo: Number(value) })} />
+                  </div>
+                ) : (
+                  <div className="form-grid quick">
+                    <Field label="Barrenos dados" type="number" value={drillRow.barrenosDados} onChange={(value) => updateDrill({ barrenosDados: Number(value) })} />
+                    <Field label="Barrenos cargados" type="number" value={drillRow.barrenosCargados} onChange={(value) => updateDrill({ barrenosCargados: Number(value) })} />
+                    <Field label="Metros dados" type="number" value={drillRow.metrosDados} onChange={(value) => updateDrill({ metrosDados: Number(value) })} />
+                    <Field label="Horas servicio" type="number" value={drillRow.horasServicio} onChange={(value) => updateDrill({ horasServicio: Number(value) })} />
+                    <Field label="Longitud" type="number" value={drillRow.longitud} onChange={(value) => updateDrill({ longitud: Number(value) })} />
+                    <Field label="Desarrollo" type="number" value={drillRow.desarrollo} onChange={(value) => updateDrill({ desarrollo: Number(value) })} />
+                  </div>
+                )}
+              </>
+            )}
+
+            {step === 'detalles' && (
+              <>
+                <AssistantFocusTitle title="Cierre y datos opcionales" meta="Captura solo lo que aplique; lo demas sigue disponible en Formulario completo." />
+                {isBlast ? (
+                  <>
+                    <div className="form-grid quick">
+                      <Field label="ANFO inicial" type="number" value={blastRow.anfoInicial} onChange={(value) => updateBlast({ anfoInicial: Number(value) })} />
+                      <Field label="ANFO final" type="number" value={blastRow.anfoFinal} onChange={(value) => updateBlast({ anfoFinal: Number(value) })} />
+                    </div>
+                    <TextArea label="Observaciones de voladura" value={blastRow.observaciones} onChange={(value) => updateBlast({ observaciones: value })} />
+                  </>
+                ) : (
+                  <details className="quick-details assistant-details">
+                    <summary>Horometros e insumos</summary>
+                    <div className="form-grid quick">
+                      <Field label="Hor. diesel inicial" type="number" value={drillRow.horometroDieselInicial} onChange={(value) => updateDrill({ horometroDieselInicial: Number(value) })} />
+                      <Field label="Hor. diesel final" type="number" value={drillRow.horometroDieselFinal} onChange={(value) => updateDrill({ horometroDieselFinal: Number(value) })} />
+                      <Field label="Hor. elect inicial" type="number" value={drillRow.horometroElectInicial} onChange={(value) => updateDrill({ horometroElectInicial: Number(value) })} />
+                      <Field label="Hor. elect final" type="number" value={drillRow.horometroElectFinal} onChange={(value) => updateDrill({ horometroElectFinal: Number(value) })} />
+                      <Field label="Zanco" type="number" value={drillRow.zanco} onChange={(value) => updateDrill({ zanco: Number(value) })} />
+                      <Field label="Cople" type="number" value={drillRow.cople} onChange={(value) => updateDrill({ cople: Number(value) })} />
+                      <Field label="Barra" type="number" value={drillRow.barra} onChange={(value) => updateDrill({ barra: Number(value) })} />
+                      <Field label="Broca" type="number" value={drillRow.broca} onChange={(value) => updateDrill({ broca: Number(value) })} />
+                    </div>
+                  </details>
+                )}
+                <details className="quick-details assistant-details">
+                  <summary>Apoyo del turno</summary>
+                  <div className="form-grid quick">
+                    <Field label="Polvorero" value={record.polvorero} onChange={(value) => setRecord({ ...record, polvorero: value })} />
+                    <Field label="Chofer camion personal" value={record.choferCamion} onChange={(value) => setRecord({ ...record, choferCamion: value })} />
+                    <Field label="Chofer pipa" value={record.choferPipa} onChange={(value) => setRecord({ ...record, choferPipa: value })} />
+                    <Field label="Bob cat" value={record.bobCat} onChange={(value) => setRecord({ ...record, bobCat: value })} />
+                    <Field label="Bombeo" value={record.bombeo} onChange={(value) => setRecord({ ...record, bombeo: value })} />
+                    <Field label="Servicios" value={record.servicios} onChange={(value) => setRecord({ ...record, servicios: value })} />
+                  </div>
+                </details>
+                <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+                <TextArea label="Inasistencias / permisos" value={record.inasistencias} onChange={(value) => setRecord({ ...record, inasistencias: value })} />
+                <RecordExtrasPanel record={record} setRecord={setRecord} />
+              </>
+            )}
+          </section>
+
+          <AssistantStepActions steps={steps} active={step} onChange={setStep} />
+        </div>
+      </div>
     </div>
   )
 }
@@ -3939,115 +4052,119 @@ function RezagadoAssistantForm({
         placeholder="Ej. ST-018 operador Juan nivel 10300 rezagado 8 camiones diesel 40"
         onApply={applyQuickCapture}
       />
-      <AssistantStepNav steps={steps} active={step} onChange={setStep} />
+      <div className="assistant-step-layout">
+        <AssistantStepNav steps={steps} active={step} onChange={setStep} />
 
-      <section className="assistant-focus-card">
-        {step === 'equipo' && (
-          <>
-            <AssistantFocusTitle title="Equipo de rezagado" meta={`${isScoop ? 'Scoop tram' : 'Retro'} ${safeIndex + 1} de ${rowCount}`} />
-            <div className="quick-choice-grid two">
-              <ChoiceButton active={equipment === 'scoop'} icon={<Truck size={21} />} label="Scoop tram" meta={`${record.scoopTram.length || 1} registros`} onClick={() => selectEquipment('scoop')} />
-              <ChoiceButton active={equipment === 'retro'} icon={<HardHat size={21} />} label="Retro" meta={`${record.retro.length || 1} registros`} onClick={() => selectEquipment('retro')} />
-            </div>
-            <AssistantRowTools
-              addLabel="Agregar equipo"
-              count={rowCount}
-              index={safeIndex}
-              label={isScoop ? 'Scoop' : 'Retro'}
-              onAdd={addCurrentRow}
-              onDuplicate={duplicateCurrentRow}
-              onRemove={removeCurrentRow}
-              onSelect={setRowIndex}
-            />
-            {isScoop ? (
+        <div className="assistant-step-body">
+          <section className="assistant-focus-card">
+            {step === 'equipo' && (
               <>
-                <QrScanButton onResult={(value) => updateScoopRow({ equipo: resolveScannedEquipment(value, scoopOptions) })} />
-                <div className="form-grid quick">
-                  <Field label="Equipo" value={scoopRow.equipo} options={scoopOptions} onChange={(value) => updateScoopRow({ equipo: value })} />
-                  <Field label="Operador" value={scoopRow.operador} suggestions={catalog.operadores} onChange={(value) => updateScoopRow({ operador: value })} />
-                  <Field label="Nivel / obra" value={scoopRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ nivelObra: value })} />
-                  <Field label="Destino" value={scoopRow.destino} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ destino: value })} />
+                <AssistantFocusTitle title="Equipo de rezagado" meta={`${isScoop ? 'Scoop tram' : 'Retro'} ${safeIndex + 1} de ${rowCount}`} />
+                <div className="quick-choice-grid two">
+                  <ChoiceButton active={equipment === 'scoop'} icon={<Truck size={21} />} label="Scoop tram" meta={`${record.scoopTram.length || 1} registros`} onClick={() => selectEquipment('scoop')} />
+                  <ChoiceButton active={equipment === 'retro'} icon={<HardHat size={21} />} label="Retro" meta={`${record.retro.length || 1} registros`} onClick={() => selectEquipment('retro')} />
+                </div>
+                <AssistantRowTools
+                  addLabel="Agregar equipo"
+                  count={rowCount}
+                  index={safeIndex}
+                  label={isScoop ? 'Scoop' : 'Retro'}
+                  onAdd={addCurrentRow}
+                  onDuplicate={duplicateCurrentRow}
+                  onRemove={removeCurrentRow}
+                  onSelect={setRowIndex}
+                />
+                {isScoop ? (
+                  <>
+                    <QrScanButton onResult={(value) => updateScoopRow({ equipo: resolveScannedEquipment(value, scoopOptions) })} />
+                    <div className="form-grid quick">
+                      <Field label="Equipo" value={scoopRow.equipo} options={scoopOptions} onChange={(value) => updateScoopRow({ equipo: value })} />
+                      <Field label="Operador" value={scoopRow.operador} suggestions={catalog.operadores} onChange={(value) => updateScoopRow({ operador: value })} />
+                      <Field label="Nivel / obra" value={scoopRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ nivelObra: value })} />
+                      <Field label="Destino" value={scoopRow.destino} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ destino: value })} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <QrScanButton onResult={(value) => updateRetroRow({ equipo: resolveScannedEquipment(value, retroOptions) })} />
+                    <div className="form-grid quick">
+                      <Field label="Equipo" value={retroRow.equipo} options={retroOptions} onChange={(value) => updateRetroRow({ equipo: value })} />
+                      <Field label="Operador" value={retroRow.operador} suggestions={catalog.operadores} onChange={(value) => updateRetroRow({ operador: value })} />
+                      <Field label="Nivel / obra" value={retroRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateRetroRow({ nivelObra: value })} />
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {step === 'trabajo' && (
+              <>
+                <AssistantFocusTitle title="Trabajo realizado" meta="Puedes seleccionar varios trabajos para el mismo equipo." />
+                <div className="quick-choice-grid compact multi-choice-grid assistant-work-grid">
+                  {isScoop
+                    ? haulActivityKeys.map((key) => (
+                      <ChoiceButton
+                        key={key}
+                        active={selectedScoopActivities.includes(key)}
+                        label={haulActivityLabels[key]}
+                        onClick={() => toggleScoopActivity(key)}
+                      />
+                    ))
+                    : retroActivityKeys.map((key) => (
+                      <ChoiceButton
+                        key={key}
+                        active={selectedRetroActivities.includes(key)}
+                        label={retroActivityLabels[key]}
+                        onClick={() => toggleRetroActivity(key)}
+                      />
+                    ))}
                 </div>
               </>
-            ) : (
+            )}
+
+            {step === 'produccion' && (
               <>
-                <QrScanButton onResult={(value) => updateRetroRow({ equipo: resolveScannedEquipment(value, retroOptions) })} />
-                <div className="form-grid quick">
-                  <Field label="Equipo" value={retroRow.equipo} options={retroOptions} onChange={(value) => updateRetroRow({ equipo: value })} />
-                  <Field label="Operador" value={retroRow.operador} suggestions={catalog.operadores} onChange={(value) => updateRetroRow({ operador: value })} />
-                  <Field label="Nivel / obra" value={retroRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateRetroRow({ nivelObra: value })} />
-                </div>
+                <AssistantFocusTitle title="Cantidades y consumo" meta="Solo aparecen las actividades seleccionadas." />
+                {isScoop ? (
+                  <div className="form-grid quick">
+                    {selectedScoopActivities.map((key) => (
+                      <Field key={key} label={`Cantidad ${haulActivityLabels[key]}`} type="number" value={scoopRow[key]} onChange={(value) => updateScoopRow({ [key]: Number(value) } as Partial<HaulRow>)} />
+                    ))}
+                    <Field label="Camiones" type="number" value={scoopRow.camiones} onChange={(value) => updateScoopRow({ camiones: Number(value) })} />
+                    <Field label="Hor. inicial" type="number" value={scoopRow.horometroInicial} onChange={(value) => updateScoopRow({ horometroInicial: Number(value) })} />
+                    <Field label="Hor. final" type="number" value={scoopRow.horometroFinal} onChange={(value) => updateScoopRow({ horometroFinal: Number(value) })} />
+                    <Field label="Diesel" type="number" value={scoopRow.diesel} onChange={(value) => updateScoopRow({ diesel: Number(value) })} />
+                  </div>
+                ) : (
+                  <div className="form-grid quick">
+                    {selectedRetroActivities.map((key) => (
+                      <Field key={key} label={`Cantidad ${retroActivityLabels[key]}`} type="number" value={retroRow[key]} onChange={(value) => updateRetroRow({ [key]: Number(value) } as Partial<RetroRow>)} />
+                    ))}
+                    <Field label="Hor. inicial" type="number" value={retroRow.horometroInicial} onChange={(value) => updateRetroRow({ horometroInicial: Number(value) })} />
+                    <Field label="Hor. final" type="number" value={retroRow.horometroFinal} onChange={(value) => updateRetroRow({ horometroFinal: Number(value) })} />
+                    <Field label="Diesel" type="number" value={retroRow.diesel} onChange={(value) => updateRetroRow({ diesel: Number(value) })} />
+                  </div>
+                )}
               </>
             )}
-          </>
-        )}
 
-        {step === 'trabajo' && (
-          <>
-            <AssistantFocusTitle title="Trabajo realizado" meta="Puedes seleccionar varios trabajos para el mismo equipo." />
-            <div className="quick-choice-grid compact multi-choice-grid assistant-work-grid">
-              {isScoop
-                ? haulActivityKeys.map((key) => (
-                  <ChoiceButton
-                    key={key}
-                    active={selectedScoopActivities.includes(key)}
-                    label={haulActivityLabels[key]}
-                    onClick={() => toggleScoopActivity(key)}
-                  />
-                ))
-                : retroActivityKeys.map((key) => (
-                  <ChoiceButton
-                    key={key}
-                    active={selectedRetroActivities.includes(key)}
-                    label={retroActivityLabels[key]}
-                    onClick={() => toggleRetroActivity(key)}
-                  />
-                ))}
-            </div>
-          </>
-        )}
-
-        {step === 'produccion' && (
-          <>
-            <AssistantFocusTitle title="Cantidades y consumo" meta="Solo aparecen las actividades seleccionadas." />
-            {isScoop ? (
-              <div className="form-grid quick">
-                {selectedScoopActivities.map((key) => (
-                  <Field key={key} label={`Cantidad ${haulActivityLabels[key]}`} type="number" value={scoopRow[key]} onChange={(value) => updateScoopRow({ [key]: Number(value) } as Partial<HaulRow>)} />
-                ))}
-                <Field label="Camiones" type="number" value={scoopRow.camiones} onChange={(value) => updateScoopRow({ camiones: Number(value) })} />
-                <Field label="Hor. inicial" type="number" value={scoopRow.horometroInicial} onChange={(value) => updateScoopRow({ horometroInicial: Number(value) })} />
-                <Field label="Hor. final" type="number" value={scoopRow.horometroFinal} onChange={(value) => updateScoopRow({ horometroFinal: Number(value) })} />
-                <Field label="Diesel" type="number" value={scoopRow.diesel} onChange={(value) => updateScoopRow({ diesel: Number(value) })} />
-              </div>
-            ) : (
-              <div className="form-grid quick">
-                {selectedRetroActivities.map((key) => (
-                  <Field key={key} label={`Cantidad ${retroActivityLabels[key]}`} type="number" value={retroRow[key]} onChange={(value) => updateRetroRow({ [key]: Number(value) } as Partial<RetroRow>)} />
-                ))}
-                <Field label="Hor. inicial" type="number" value={retroRow.horometroInicial} onChange={(value) => updateRetroRow({ horometroInicial: Number(value) })} />
-                <Field label="Hor. final" type="number" value={retroRow.horometroFinal} onChange={(value) => updateRetroRow({ horometroFinal: Number(value) })} />
-                <Field label="Diesel" type="number" value={retroRow.diesel} onChange={(value) => updateRetroRow({ diesel: Number(value) })} />
-              </div>
+            {step === 'cierre' && (
+              <>
+                <AssistantFocusTitle title="Observaciones del turno" meta="El detalle queda guardado en historial aunque no sincronices todavia." />
+                {isScoop ? (
+                  <TextArea label="Observaciones del equipo" value={scoopRow.observaciones} onChange={(value) => updateScoopRow({ observaciones: value })} />
+                ) : (
+                  <TextArea label="Observaciones del equipo" value={retroRow.observaciones} onChange={(value) => updateRetroRow({ observaciones: value })} />
+                )}
+                <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
+                <RecordExtrasPanel record={record} setRecord={setRecord} />
+              </>
             )}
-          </>
-        )}
+          </section>
 
-        {step === 'cierre' && (
-          <>
-            <AssistantFocusTitle title="Observaciones del turno" meta="El detalle queda guardado en historial aunque no sincronices todavia." />
-            {isScoop ? (
-              <TextArea label="Observaciones del equipo" value={scoopRow.observaciones} onChange={(value) => updateScoopRow({ observaciones: value })} />
-            ) : (
-              <TextArea label="Observaciones del equipo" value={retroRow.observaciones} onChange={(value) => updateRetroRow({ observaciones: value })} />
-            )}
-            <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
-            <RecordExtrasPanel record={record} setRecord={setRecord} />
-          </>
-        )}
-      </section>
-
-      <AssistantStepActions steps={steps} active={step} onChange={setStep} />
+          <AssistantStepActions steps={steps} active={step} onChange={setStep} />
+        </div>
+      </div>
     </div>
   )
 }

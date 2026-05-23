@@ -1084,6 +1084,11 @@ button.role-select:hover {
   gap: 16px;
 }
 
+.module-capture-workbench {
+  display: grid;
+  gap: 16px;
+}
+
 .capture-layout-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1104,6 +1109,31 @@ button.role-select:hover {
 
 .capture-layout-tabs button.active,
 .assistant-module-nav button.active {
+  background: #102a34;
+  border-color: #102a34;
+  color: #fff;
+}
+
+.module-inline-tabs {
+  display: none;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(23, 37, 51, 0.07);
+}
+
+.module-inline-tabs button {
+  justify-content: center;
+  min-width: 0;
+  border-color: transparent;
+  background: #f4f8f8;
+  color: #263744;
+}
+
+.module-inline-tabs button.active {
   background: #102a34;
   border-color: #102a34;
   color: #fff;
@@ -1282,6 +1312,31 @@ button.role-select:hover {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+
+.assistant-step-layout {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.assistant-step-layout .assistant-stepper {
+  position: sticky;
+  top: 104px;
+  grid-template-columns: 1fr;
+  padding: 8px;
+  border: 1px solid #dce4eb;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 12px 28px rgba(23, 37, 51, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.assistant-step-body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
 }
 
 .assistant-stepper button {
@@ -3366,6 +3421,50 @@ th {
   .assistant-progress-grid,
   .assistant-stepper {
     grid-template-columns: 1fr;
+  }
+
+  .assistant-step-layout {
+    grid-template-columns: 86px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+  }
+
+  .assistant-step-layout .assistant-stepper {
+    top: 126px;
+    gap: 7px;
+    padding: 6px;
+  }
+
+  .assistant-step-layout .assistant-stepper button {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    min-height: 72px;
+    padding: 8px 4px;
+    text-align: center;
+  }
+
+  .assistant-step-layout .assistant-stepper button span {
+    width: 30px;
+    height: 30px;
+  }
+
+  .assistant-step-layout .assistant-stepper button strong {
+    max-width: 100%;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
+  .module-inline-tabs {
+    display: grid;
+  }
+
+  .module-inline-tabs button {
+    display: grid;
+    gap: 4px;
+    min-height: 58px;
+    padding: 8px 4px;
+    font-size: 11px;
+    text-align: center;
   }
 
   .assistant-module-nav {
