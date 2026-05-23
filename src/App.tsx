@@ -6573,11 +6573,13 @@ function findKnownValue(text: string, values: string[]) {
     .map((value) => {
       const normalized = normalizePlainText(value)
       const code = normalizePlainText(value.split(/\s+-\s+|\s+/)[0] ?? '')
+      const compactCode = code.replace(/[^a-z0-9]/g, '')
       return {
         value,
         normalized,
         code,
-        compactCode: code.replace(/[^a-z0-9]/g, ''),
+        compactCode,
+        compactAliases: compactCodeAliases(compactCode),
       }
     })
     .sort((a, b) => b.normalized.length - a.normalized.length)
@@ -6585,8 +6587,24 @@ function findKnownValue(text: string, values: string[]) {
     text.includes(item.normalized)
       || item.normalized.includes(text)
       || Boolean(item.code && text.includes(item.code))
-      || Boolean(item.compactCode && compactText.includes(item.compactCode)),
+      || item.compactAliases.some((alias) => compactText.includes(alias)),
   )?.value
+}
+
+function compactCodeAliases(code: string) {
+  const aliases = new Set<string>()
+  if (code) aliases.add(code)
+  const match = code.match(/^([a-z]+)0*(\d+)$/)
+  if (match) {
+    const [, prefix, digits] = match
+    const number = String(Number(digits))
+    if (number !== 'NaN') {
+      aliases.add(`${prefix}${number}`)
+      aliases.add(`${prefix}${number.padStart(2, '0')}`)
+      aliases.add(`${prefix}${number.padStart(3, '0')}`)
+    }
+  }
+  return [...aliases].filter(Boolean)
 }
 
 function extractPhrase(text: string, labels: string[]) {
