@@ -1,6 +1,6 @@
 {
-  "name": "MGA Bitacora Operaciones Mina",
-  "short_name": "MGA Mina",
+  "name": "BITACORA MGA",
+  "short_name": "BITACORA MGA",
   "description": "Captura offline y revision KPI para operaciones mina.",
   "start_url": "/",
   "display": "standalone",

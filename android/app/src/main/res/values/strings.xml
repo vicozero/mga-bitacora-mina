@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">MGA Bitacora Mina</string>
-    <string name="title_activity_main">MGA Bitacora Mina</string>
+    <string name="app_name">BITACORA MGA</string>
+    <string name="title_activity_main">BITACORA MGA</string>
     <string name="package_name">com.mga.bitacoramina</string>
     <string name="custom_url_scheme">com.mga.bitacoramina</string>
 </resources>

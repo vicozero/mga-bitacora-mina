@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.mga.bitacoramina',
-  appName: 'MGA Bitacora Mina',
+  appName: 'BITACORA MGA',
   webDir: 'dist'
 };
 
