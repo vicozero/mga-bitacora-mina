@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, PointerEvent, ReactNode } from 'react'
+import { App as CapacitorApp } from '@capacitor/app'
 import {
   Accessibility,
   Activity,
@@ -46,6 +47,7 @@ import {
   X,
 } from 'lucide-react'
 import { Capacitor, registerPlugin } from '@capacitor/core'
+import type { PluginListenerHandle } from '@capacitor/core'
 import ExcelJS from 'exceljs'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
@@ -743,6 +745,7 @@ function App() {
   const [actionsOpen, setActionsOpen] = useState(false)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const reportRef = useRef<HTMLDivElement>(null)
+  const latestDraftRef = useRef<CaptureDraft | null>(null)
   const isApk = Capacitor.isNativePlatform()
 
   const activeUsers = useMemo(() => users.filter((user) => user.active && !user.deletedAt), [users])
@@ -847,6 +850,7 @@ function App() {
       editingId,
       savedAt: nowIso(),
     }
+    latestDraftRef.current = draft
     if (hasCaptureDraftContent(draft)) {
       localStorage.setItem(CAPTURE_DRAFT_KEY, JSON.stringify(draft))
       return
@@ -867,6 +871,67 @@ function App() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  useEffect(() => {
+    if (!isApk) return
+
+    const saveExitDraft = () => {
+      const draft = latestDraftRef.current
+      if (!draft) return false
+      const snapshot = { ...draft, savedAt: nowIso() }
+      latestDraftRef.current = snapshot
+      if (hasCaptureDraftContent(snapshot)) {
+        localStorage.setItem(CAPTURE_DRAFT_KEY, JSON.stringify(snapshot))
+        return true
+      }
+      localStorage.removeItem(CAPTURE_DRAFT_KEY)
+      return false
+    }
+
+    const listeners: Promise<PluginListenerHandle>[] = [
+      CapacitorApp.addListener('pause', saveExitDraft),
+    ]
+
+    if (Capacitor.getPlatform() === 'android') {
+      listeners.push(CapacitorApp.addListener('backButton', () => {
+        if (reviewOpen) {
+          setReviewOpen(false)
+          setCloseTurnoOnSave(false)
+          return
+        }
+        if (drawerOpen) {
+          setDrawerOpen(false)
+          return
+        }
+        if (actionsOpen) {
+          setActionsOpen(false)
+          return
+        }
+        if (chatPanelOpen) {
+          setChatPanelOpen(false)
+          return
+        }
+
+        const shouldExit = window.confirm('Estas seguro que deseas salir?')
+        if (!shouldExit) {
+          setMessage('Salida cancelada.')
+          return
+        }
+
+        const draftSaved = saveExitDraft()
+        setMessage(draftSaved ? 'Borrador guardado. Cerrando app.' : 'Cerrando app.')
+        void CapacitorApp.exitApp()
+      }))
+    }
+
+    return () => {
+      void Promise.all(listeners).then((handles) => {
+        handles.forEach((handle) => {
+          void handle.remove()
+        })
+      })
+    }
+  }, [actionsOpen, chatPanelOpen, drawerOpen, isApk, reviewOpen])
 
   function persist(next: MineRecord[]) {
     const normalized = mergeRecords(next.map(normalizeRecord))
