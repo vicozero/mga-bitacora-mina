@@ -483,6 +483,7 @@ const USERS_KEY = 'mga-bitacora-users-v1'
 const SESSION_KEY = 'mga-bitacora-session-v1'
 const DEVICE_ID_KEY = 'mga-bitacora-device-id'
 const DEFAULT_API_URL = 'https://mga-bitacora-mina-mga.onrender.com'
+const LEGACY_API_URLS = ['https://mga-bitacora-mina.onrender.com']
 const BARRENACION_TEMPLATE = '/templates/barrenacion-voladuras.pdf'
 const REZAGADO_TEMPLATE = '/templates/rezagado.pdf'
 const barrenacionActivities = ['jumbo', 'maquinaPierna', 'voladura'] as const
@@ -6172,7 +6173,10 @@ function getInitialSection(): AppSection {
 }
 
 function loadApiUrl() {
-  return localStorage.getItem(API_URL_KEY) ?? import.meta.env.VITE_API_URL ?? DEFAULT_API_URL
+  const stored = localStorage.getItem(API_URL_KEY)
+  if (stored && !LEGACY_API_URLS.includes(stored.replace(/\/$/, ''))) return stored
+  localStorage.setItem(API_URL_KEY, import.meta.env.VITE_API_URL ?? DEFAULT_API_URL)
+  return import.meta.env.VITE_API_URL ?? DEFAULT_API_URL
 }
 
 function loadWhatsAppNumber() {
