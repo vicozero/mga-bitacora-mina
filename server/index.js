@@ -16,7 +16,7 @@ const messagesFile =
 const usersFile =
   process.env.USERS_FILE || path.join(path.dirname(dataFile), 'users.json')
 const distDir = path.join(__dirname, '..', 'dist')
-const defaultPublicUrl = 'https://mga-bitacora-mina.onrender.com'
+const defaultPublicUrl = 'https://mga-bitacora-mina-mga.onrender.com'
 
 app.use(cors())
 app.use(express.json({ limit: '15mb' }))

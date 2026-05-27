@@ -13,7 +13,7 @@ services:
       - key: MESSAGES_FILE
         value: /var/data/messages.json
       - key: PUBLIC_APP_URL
-        value: https://mga-bitacora-mina.onrender.com
+        value: https://mga-bitacora-mina-mga.onrender.com
       - key: SLACK_WEBHOOK_URL
         sync: false
     disk:

@@ -50,7 +50,7 @@ En Render, agregar `SLACK_WEBHOOK_URL` en Environment Variables y redeployar el 
 
 En Render, desplegar el repositorio como Web Service. La APK debe tener configurada la URL publicada, por ejemplo:
 
-`https://mga-bitacora-mina.onrender.com`
+`https://mga-bitacora-mina-mga.onrender.com`
 
 ## APK
 
