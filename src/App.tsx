@@ -78,6 +78,7 @@ type HaulActivity = 'rezagado' | 'traspaleo' | 'limpia' | 'balastreo' | 'planill
 type RetroActivity = 'amacice' | 'reAmacice' | 'tableo' | 'limpia' | 'balastreo' | 'mtAcequia'
 type ChatMessageType = 'aviso' | 'mensaje' | 'urgente'
 type ReviewInsightStatus = 'ready' | 'warning' | 'critical'
+type EvaluationStatus = '' | 'bueno' | 'regular' | 'malo'
 
 type SpeechRecognitionResultItem = {
   transcript: string
@@ -142,12 +143,16 @@ type DrillRow = {
   ayudante: string
   nivelObra: string
   rpaCfte: string
+  tipoBarra: string
   longitud: number
   cuele: number
   desarrollo: number
+  barrenosProgramados: number
   barrenosDados: number
   barrenosCargados: number
   metrosDados: number
+  diametro: number
+  patronPerforacion: string
   horasServicio: number
   zanco: number
   cople: number
@@ -166,11 +171,18 @@ type BlastRow = {
   oficial: string
   ayudante: string
   rpaCfte: string
+  horaCarga: string
+  horaVoladura: string
+  tipoExplosivo: string
+  cantidadExplosivo: number
   longitud: number
   cuele: number
   desarrollo: number
   barrenosPegados: number
   metrosPegados: number
+  detonadores: number
+  sistemaIniciacion: string
+  resultadoVoladura: EvaluationStatus
   horasServicio: number
   anfoInicial: number
   anfoFinal: number
@@ -183,6 +195,14 @@ type HaulRow = {
   operador: string
   nivelObra: string
   destino: string
+  ciclos: number
+  tiempoCicloPromedio: number
+  toneladasCargadas: number
+  equipoTransporte: string
+  viajes: number
+  toneladasTransportadas: number
+  destinoFinal: string
+  estadoVias: EvaluationStatus
   rezagado: number
   traspaleo: number
   limpia: number
@@ -201,6 +221,11 @@ type RetroRow = {
   equipo: string
   operador: string
   nivelObra: string
+  equipoTransporte: string
+  viajes: number
+  toneladasTransportadas: number
+  destinoFinal: string
+  estadoVias: EvaluationStatus
   amacice: number
   reAmacice: number
   tableo: number
@@ -489,6 +514,11 @@ const REZAGADO_TEMPLATE = '/templates/rezagado.pdf'
 const barrenacionActivities = ['jumbo', 'maquinaPierna', 'voladura'] as const
 const rezagadoEquipments = ['scoop', 'retro'] as const
 const today = new Date().toISOString().slice(0, 10)
+const tipoBarraOptions = ['38 mm', '45 mm', '51 mm', '76 mm']
+const explosivoOptions = ['Emulnor 3000', 'ANFO', 'Emulsion encartuchada', 'Alto explosivo']
+const sistemaIniciacionOptions = ['No Electrico', 'Electrico', 'Electronico', 'Mecha de seguridad']
+const transporteOptions = ['Camion Minero CAT 772', 'Camion bajo perfil', 'Camion articulado', 'Volteo']
+const destinoDisposicionOptions = ['Cancha de Disposicion Sur', 'Tepetatera', 'Stockpile', 'Quebradora', 'Relleno']
 
 const baseDefaults = {
   supervisor: '',
@@ -594,12 +624,16 @@ const emptyDrillRow = (equipo: string): DrillRow => ({
   ayudante: '',
   nivelObra: '',
   rpaCfte: '',
+  tipoBarra: tipoBarraOptions[0] ?? '',
   longitud: 0,
   cuele: 0,
   desarrollo: 0,
+  barrenosProgramados: 0,
   barrenosDados: 0,
   barrenosCargados: 0,
   metrosDados: 0,
+  diametro: 0,
+  patronPerforacion: '',
   horasServicio: 0,
   zanco: 0,
   cople: 0,
@@ -618,11 +652,18 @@ const emptyBlastRow = (): BlastRow => ({
   oficial: '',
   ayudante: '',
   rpaCfte: '',
+  horaCarga: '',
+  horaVoladura: '',
+  tipoExplosivo: explosivoOptions[0] ?? '',
+  cantidadExplosivo: 0,
   longitud: 0,
   cuele: 0,
   desarrollo: 0,
   barrenosPegados: 0,
   metrosPegados: 0,
+  detonadores: 0,
+  sistemaIniciacion: sistemaIniciacionOptions[0] ?? '',
+  resultadoVoladura: '',
   horasServicio: 0,
   anfoInicial: 0,
   anfoFinal: 0,
@@ -635,6 +676,14 @@ const emptyHaulRow = (equipo: string): HaulRow => ({
   operador: '',
   nivelObra: '',
   destino: '',
+  ciclos: 0,
+  tiempoCicloPromedio: 0,
+  toneladasCargadas: 0,
+  equipoTransporte: transporteOptions[0] ?? '',
+  viajes: 0,
+  toneladasTransportadas: 0,
+  destinoFinal: destinoDisposicionOptions[0] ?? '',
+  estadoVias: '',
   rezagado: 0,
   traspaleo: 0,
   limpia: 0,
@@ -653,6 +702,11 @@ const emptyRetroRow = (): RetroRow => ({
   equipo: defaultRetro,
   operador: '',
   nivelObra: '',
+  equipoTransporte: transporteOptions[0] ?? '',
+  viajes: 0,
+  toneladasTransportadas: 0,
+  destinoFinal: destinoDisposicionOptions[0] ?? '',
+  estadoVias: '',
   amacice: 0,
   reAmacice: 0,
   tableo: 0,
@@ -1916,7 +1970,10 @@ function App() {
 
       {section === 'home' ? (
         <HomeScreen
+          currentShift={turnoBase.turno}
+          currentSupervisor={currentSupervisorName()}
           hasTurnoDraft={hasTurnoDraft}
+          kpis={reviewKpis}
           pendingMessages={pendingMessages}
           pendingSync={pendingTotal}
           recordCounts={recordCounts}
@@ -2740,7 +2797,10 @@ function AccessDeniedScreen({ title, message, onHome }: { title: string; message
 }
 
 function HomeScreen({
+  currentShift,
+  currentSupervisor,
   hasTurnoDraft,
+  kpis,
   pendingMessages,
   pendingSync,
   recordCounts,
@@ -2758,7 +2818,10 @@ function HomeScreen({
   onTurnoCompleto,
   onUsers,
 }: {
+  currentShift: Shift
+  currentSupervisor: string
   hasTurnoDraft: boolean
+  kpis: ReturnType<typeof computeKpis>
   pendingMessages: number
   pendingSync: number
   recordCounts: { barrenacion: number; rezagado: number; seguridad: number; total: number }
@@ -2776,101 +2839,172 @@ function HomeScreen({
   onTurnoCompleto: () => void
   onUsers: () => void
 }) {
+  const displaySupervisor = currentSupervisor || 'Supervisor'
+  const dateLabel = new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })
+  const turnoLabel = currentShift === '2' ? 'Noche' : 'Dia'
+  const toneladasTurno = kpis.toneladasRezagadas || kpis.rezagado
+  const viajesTurno = kpis.viajes || kpis.camiones
+  const productionPercent = Math.min(100, Math.round((toneladasTurno / 420) * 100))
+  const taskPercent = recordCounts.total ? Math.min(100, Math.round(((recordCounts.barrenacion + recordCounts.rezagado) / recordCounts.total) * 100)) : 0
+  const incidentPercent = kpis.accidentes || kpis.incidentes ? 100 : 0
+  const summaryCards = [
+    { label: 'Barrenos ejecutados', value: kpis.barrenosDados },
+    { label: 'Explosivo usado', value: `${kpis.explosivoKg} kg` },
+    { label: 'Toneladas rezagadas', value: toneladasTurno },
+    { label: 'Viajes realizados', value: viajesTurno },
+    { label: 'Avance promedio', value: `${kpis.metrosDados} m` },
+    { label: 'Eventos registrados', value: recordCounts.total },
+  ]
+  const indicatorRows = [
+    { label: 'Produccion del turno', value: `${toneladasTurno} TM`, percent: productionPercent, tone: 'blue' },
+    { label: 'Cumplimiento de tareas', value: `${taskPercent}%`, percent: taskPercent, tone: 'yellow' },
+    { label: 'Incidentes del turno', value: `${kpis.accidentes + kpis.incidentes}`, percent: incidentPercent, tone: 'purple' },
+  ]
   return (
-    <section className="home-screen">
-      <div className="home-hero">
-        <img src="/mga-logo.jfif" alt="MGA" />
-        <div>
-          <span>Operacion mina</span>
-          <h1>Modulos</h1>
-          <p>Elige una tarea y captura solo el bloque necesario.</p>
+    <section className="home-screen supervisor-home">
+      <div className="supervisor-hero-card">
+        <div className="supervisor-hero-top">
+          <div className="supervisor-brand-mark">
+            <ShieldCheck size={34} />
+          </div>
+          <img className="supervisor-logo" src="/mga-logo.jfif" alt="MGA" />
+          <div>
+            <span>Supervisores</span>
+            <h1>Operacion interior mina</h1>
+            <p>Gestion y control operacional</p>
+          </div>
+          <button className="supervisor-alert-button" type="button" onClick={onMessages} aria-label="Abrir avisos">
+            <Bell size={22} />
+            {(pendingMessages > 0 || pendingSync > 0) && <small>{pendingMessages || pendingSync}</small>}
+          </button>
+        </div>
+
+        <div className="supervisor-greeting">
+          <strong>Hola, {displaySupervisor}</strong>
+          <span>{dateLabel} - Turno: {turnoLabel}</span>
+        </div>
+
+        <div className="quick-register-head">
+          <span>Registro rapido</span>
+          {hasTurnoDraft && (
+            <button type="button" onClick={onContinueTurno}>
+              <ClipboardCheck size={16} /> Continuar borrador
+            </button>
+          )}
+        </div>
+
+        <div className="supervisor-quick-grid" aria-label="Registro rapido">
+          <button className="supervisor-quick-card drill" type="button" onClick={() => onOpenCapture('barrenacion')}>
+            <span><Drill size={34} /></span>
+            <strong>Barrenacion y Voladuras</strong>
+          </button>
+          <button className="supervisor-quick-card haul" type="button" onClick={() => onOpenCapture('rezagado')}>
+            <span><Truck size={34} /></span>
+            <strong>Rezagado Retro</strong>
+          </button>
+          <button className="supervisor-quick-card safety" type="button" onClick={() => onOpenCapture('seguridad')}>
+            <span><ClipboardCheck size={34} /></span>
+            <strong>Observaciones Generales</strong>
+          </button>
+        </div>
+
+        <div className="supervisor-summary-head">
+          <span>Resumen del turno</span>
+          <small>Actualizado local</small>
+        </div>
+        <div className="supervisor-metric-grid">
+          {summaryCards.map((item) => (
+            <article key={item.label}>
+              <strong>{item.value}</strong>
+              <span>{item.label}</span>
+            </article>
+          ))}
+        </div>
+
+        <div className="supervisor-indicators">
+          <span>Indicadores clave</span>
+          {indicatorRows.map((item) => (
+            <div className={`supervisor-indicator ${item.tone}`} key={item.label}>
+              <div>
+                <strong>{item.label}</strong>
+                <small>{item.value}</small>
+              </div>
+              <i><b style={{ width: `${item.percent}%` }} /></i>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="module-launch-grid" aria-label="Modulos principales">
-        {hasTurnoDraft && (
-          <button className="launch-card launch-green" type="button" onClick={onContinueTurno}>
-            <span><ClipboardCheck size={30} /></span>
-            <strong>Continuar turno</strong>
-            <small>Borrador activo</small>
-          </button>
-        )}
-        <button className="launch-card launch-slate" type="button" onClick={onTurnoCompleto}>
-          <span><Mountain size={30} /></span>
+      <div className="home-action-grid" aria-label="Acciones operativas">
+        <button type="button" onClick={onTurnoCompleto}>
+          <span><Mountain size={24} /></span>
           <strong>Turno completo</strong>
           <small>Varios modulos</small>
         </button>
-        <button className="launch-card launch-red" type="button" onClick={() => onOpenCapture('barrenacion')}>
-          <span><Drill size={30} /></span>
-          <strong>Barrenos</strong>
-          <small>{recordCounts.barrenacion} registros</small>
-        </button>
-        <button className="launch-card launch-cyan" type="button" onClick={() => onOpenCapture('rezagado')}>
-          <span><Truck size={30} /></span>
-          <strong>Rezagado</strong>
-          <small>{recordCounts.rezagado} registros</small>
-        </button>
-        <button className="launch-card launch-amber" type="button" onClick={() => onOpenCapture('seguridad')}>
-          <span><ShieldCheck size={30} /></span>
-          <strong>Seguridad</strong>
-          <small>{recordCounts.seguridad} registros</small>
-        </button>
-        <button className="launch-card launch-green" type="button" onClick={onHistory}>
-          <span><History size={30} /></span>
+        <button type="button" onClick={onHistory}>
+          <span><History size={24} /></span>
           <strong>Historial</strong>
           <small>{recordCounts.total} locales</small>
         </button>
-        {showDashboard && (
-          <button className="launch-card launch-teal" type="button" onClick={onDashboard}>
-            <span><LayoutDashboard size={30} /></span>
-            <strong>Revision</strong>
-            <small>KPI y reportes</small>
-          </button>
-        )}
-        <button className="launch-card launch-violet" type="button" onClick={onMessages}>
-          <span><MessageSquare size={30} /></span>
-          <strong>Mensajes</strong>
-          <small>{pendingMessages > 0 ? `${pendingMessages} pendientes` : 'Avisos'}</small>
-        </button>
-        <button className="launch-card launch-blue" type="button" onClick={onSync}>
-          <span><RefreshCw size={30} className={syncing ? 'spin' : ''} /></span>
+        <button type="button" onClick={onSync}>
+          <span><RefreshCw size={24} className={syncing ? 'spin' : ''} /></span>
           <strong>Sincronizar</strong>
           <small>{pendingSync > 0 ? `${pendingSync} por enviar` : 'Al dia'}</small>
         </button>
-        <button className="launch-card launch-slate" type="button" onClick={onNewCapture}>
-          <span><Edit3 size={30} /></span>
-          <strong>Nueva</strong>
-          <small>Limpiar captura</small>
+        <button type="button" onClick={onNewCapture}>
+          <span><Edit3 size={24} /></span>
+          <strong>Nueva captura</strong>
+          <small>Limpiar formulario</small>
         </button>
-        <button className="launch-card launch-amber" type="button" onClick={onCatalog}>
-          <span><Settings size={30} /></span>
+        {showDashboard && (
+          <button type="button" onClick={onDashboard}>
+            <span><LayoutDashboard size={24} /></span>
+            <strong>Reportes</strong>
+            <small>KPI y formatos</small>
+          </button>
+        )}
+        <button type="button" onClick={onMessages}>
+          <span><MessageSquare size={24} /></span>
+          <strong>Mensajes</strong>
+          <small>{pendingMessages > 0 ? `${pendingMessages} pendientes` : 'Avisos'}</small>
+        </button>
+        <button type="button" onClick={onCatalog}>
+          <span><Settings size={24} /></span>
           <strong>Catalogo</strong>
           <small>Equipos y operadores</small>
         </button>
         {canManageUsers && (
-          <button className="launch-card launch-teal" type="button" onClick={onUsers}>
-            <span><Users size={30} /></span>
+          <button type="button" onClick={onUsers}>
+            <span><Users size={24} /></span>
             <strong>Usuarios</strong>
             <small>Supervisores y accesos</small>
           </button>
         )}
         {showDashboard && (
-          <button className="launch-card launch-green" type="button" onClick={onDashboard}>
-            <span><FileDown size={30} /></span>
+          <button type="button" onClick={onDashboard}>
+            <span><FileDown size={24} /></span>
             <strong>Formatos</strong>
             <small>PDF / Excel</small>
           </button>
         )}
       </div>
 
-      <div className="home-summary">
+      <div className="home-feature-bar">
         <article>
-          <span>Total capturas</span>
-          <strong>{recordCounts.total}</strong>
+          <RefreshCw size={25} />
+          <div><strong>Sincronizacion</strong><span>Subida manual a Render</span></div>
         </article>
         <article>
-          <span>Sincronizacion</span>
-          <strong>{pendingSync > 0 ? `${pendingSync} pendientes` : 'Al dia'}</strong>
+          <Save size={25} />
+          <div><strong>Modo offline</strong><span>Historial completo local</span></div>
+        </article>
+        <article>
+          <ShieldCheck size={25} />
+          <div><strong>Seguridad</strong><span>Usuarios y permisos</span></div>
+        </article>
+        <article>
+          <Bell size={25} />
+          <div><strong>Alertas</strong><span>Avisos importantes</span></div>
         </article>
       </div>
     </section>
@@ -3694,13 +3828,13 @@ function BarrenacionAssistantForm({
   const [step, setStep] = useState<BarrenacionAssistantStep>('actividad')
   const [rowIndex, setRowIndex] = useState(0)
   const activity = getBarrenacionActivity(record)
+  const isBlast = activity === 'voladura'
   const steps: { key: BarrenacionAssistantStep; label: string }[] = [
-    { key: 'actividad', label: 'Actividad' },
+    { key: 'actividad', label: 'Trabajo' },
     { key: 'equipo', label: activity === 'voladura' ? 'Frente' : 'Equipo' },
-    { key: 'produccion', label: 'Produccion' },
+    { key: 'produccion', label: isBlast ? 'Voladuras' : 'Barrenacion' },
     { key: 'detalles', label: 'Cierre' },
   ]
-  const isBlast = activity === 'voladura'
   const drillKind = activity === 'maquinaPierna' ? 'maquinaPierna' : 'jumbo'
   const jumboRows = record.jumbo.length ? record.jumbo : [emptyDrillRow(defaultJumbo)]
   const maquinaRows = record.maquinaPierna.length ? record.maquinaPierna : [emptyDrillRow(defaultJumbo)]
@@ -3852,8 +3986,13 @@ function BarrenacionAssistantForm({
   }
 
   return (
-    <div className="capture-assistant-shell">
-      <PanelTitle title="Asistente barrenacion y voladuras" subtitle="Captura un registro corto y agrega mas equipos si hace falta" />
+    <div className="capture-assistant-shell assistant-theme-yellow">
+      <div className="assistant-template-header">
+        <Drill size={19} />
+        <strong>Barrenacion y Voladuras</strong>
+        <Save size={19} />
+      </div>
+      <PanelTitle title="Captura operacional" subtitle="Barrenacion y voladuras por pasos" />
       <QuickCaptureBar
         label="Captura rapida"
         placeholder="Ej. JL-019 operador Juan nivel 10300 12 barrenos 36 metros"
@@ -3899,7 +4038,8 @@ function BarrenacionAssistantForm({
                   <>
                     <QrScanButton onResult={(value) => updateDrill(drillEquipmentPatch(resolveScannedEquipment(value, drillEquipmentOptions)))} />
                     <div className="form-grid quick">
-                      <Field label="Equipo" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill(drillEquipmentPatch(value))} />
+                      <Field label="Equipo de perforacion" value={drillRow.equipo} options={drillEquipmentOptions} onChange={(value) => updateDrill(drillEquipmentPatch(value))} />
+                      <Field label="Tipo de barra" value={drillRow.tipoBarra} options={tipoBarraOptions} onChange={(value) => updateDrill({ tipoBarra: value })} />
                       <Field label="Operador" value={drillRow.operador} suggestions={catalog.operadores} onChange={(value) => updateDrill({ operador: value })} />
                       <Field label="Ayudante" value={drillRow.ayudante} onChange={(value) => updateDrill({ ayudante: value })} />
                       <Field label="Nivel / obra" value={drillRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateDrill({ nivelObra: value })} />
@@ -3915,8 +4055,14 @@ function BarrenacionAssistantForm({
                 <AssistantFocusTitle title="Produccion del turno" meta={isBlast ? 'Barrenos y metros pegados' : 'Barrenos, metros y horas'} />
                 {isBlast ? (
                   <div className="form-grid quick">
+                    <Field label="Hora de carga" type="time" value={blastRow.horaCarga} onChange={(value) => updateBlast({ horaCarga: value })} />
+                    <Field label="Hora de voladura" type="time" value={blastRow.horaVoladura} onChange={(value) => updateBlast({ horaVoladura: value })} />
+                    <Field label="Tipo de explosivo" value={blastRow.tipoExplosivo} options={explosivoOptions} onChange={(value) => updateBlast({ tipoExplosivo: value })} />
+                    <Field label="Cantidad explosivo kg" type="number" value={blastRow.cantidadExplosivo} onChange={(value) => updateBlast({ cantidadExplosivo: Number(value) })} />
                     <Field label="Barrenos pegados" type="number" value={blastRow.barrenosPegados} onChange={(value) => updateBlast({ barrenosPegados: Number(value) })} />
                     <Field label="Metros pegados" type="number" value={blastRow.metrosPegados} onChange={(value) => updateBlast({ metrosPegados: Number(value) })} />
+                    <Field label="Detonadores" type="number" value={blastRow.detonadores} onChange={(value) => updateBlast({ detonadores: Number(value) })} />
+                    <Field label="Sistema de iniciacion" value={blastRow.sistemaIniciacion} options={sistemaIniciacionOptions} onChange={(value) => updateBlast({ sistemaIniciacion: value })} />
                     <Field label="Horas servicio" type="number" value={blastRow.horasServicio} onChange={(value) => updateBlast({ horasServicio: Number(value) })} />
                     <Field label="Longitud" type="number" value={blastRow.longitud} onChange={(value) => updateBlast({ longitud: Number(value) })} />
                     <Field label="Cuele" type="number" value={blastRow.cuele} onChange={(value) => updateBlast({ cuele: Number(value) })} />
@@ -3924,12 +4070,15 @@ function BarrenacionAssistantForm({
                   </div>
                 ) : (
                   <div className="form-grid quick">
-                    <Field label="Barrenos dados" type="number" value={drillRow.barrenosDados} onChange={(value) => updateDrill({ barrenosDados: Number(value) })} />
+                    <Field label="Barrenos programados" type="number" value={drillRow.barrenosProgramados} onChange={(value) => updateDrill({ barrenosProgramados: Number(value) })} />
+                    <Field label="Barrenos ejecutados" type="number" value={drillRow.barrenosDados} onChange={(value) => updateDrill({ barrenosDados: Number(value) })} />
                     <Field label="Barrenos cargados" type="number" value={drillRow.barrenosCargados} onChange={(value) => updateDrill({ barrenosCargados: Number(value) })} />
                     <Field label="Metros dados" type="number" value={drillRow.metrosDados} onChange={(value) => updateDrill({ metrosDados: Number(value) })} />
+                    <Field label="Longitud de perforacion m" type="number" value={drillRow.longitud} onChange={(value) => updateDrill({ longitud: Number(value) })} />
+                    <Field label="Avance m" type="number" value={drillRow.desarrollo} onChange={(value) => updateDrill({ desarrollo: Number(value) })} />
+                    <Field label="Diametro mm" type="number" value={drillRow.diametro} onChange={(value) => updateDrill({ diametro: Number(value) })} />
+                    <Field label="Patron de perforacion" value={drillRow.patronPerforacion} onChange={(value) => updateDrill({ patronPerforacion: value })} />
                     <Field label="Horas servicio" type="number" value={drillRow.horasServicio} onChange={(value) => updateDrill({ horasServicio: Number(value) })} />
-                    <Field label="Longitud" type="number" value={drillRow.longitud} onChange={(value) => updateDrill({ longitud: Number(value) })} />
-                    <Field label="Desarrollo" type="number" value={drillRow.desarrollo} onChange={(value) => updateDrill({ desarrollo: Number(value) })} />
                     {isAnchoringJumbo(drillRow.equipo) && (
                       <>
                         <Field label="Total anclas" type="number" value={drillRow.totalAnclas ?? 0} onChange={(value) => updateDrill({ totalAnclas: Number(value) })} />
@@ -3946,6 +4095,7 @@ function BarrenacionAssistantForm({
                 <AssistantFocusTitle title="Cierre y datos opcionales" meta="Captura solo lo que aplique; lo demas sigue disponible en Formulario completo." />
                 {isBlast ? (
                   <>
+                    <EvaluationSelector label="Resultado de la voladura" value={blastRow.resultadoVoladura} onChange={(value) => updateBlast({ resultadoVoladura: value })} />
                     <div className="form-grid quick">
                       <Field label="ANFO inicial" type="number" value={blastRow.anfoInicial} onChange={(value) => updateBlast({ anfoInicial: Number(value) })} />
                       <Field label="ANFO final" type="number" value={blastRow.anfoFinal} onChange={(value) => updateBlast({ anfoFinal: Number(value) })} />
@@ -4009,10 +4159,10 @@ function RezagadoAssistantForm({
   const [rowIndex, setRowIndex] = useState(0)
   const equipment = getRezagadoEquipment(record)
   const steps: { key: RezagadoAssistantStep; label: string }[] = [
-    { key: 'equipo', label: 'Equipo' },
-    { key: 'trabajo', label: 'Trabajo' },
+    { key: 'equipo', label: 'Datos' },
+    { key: 'trabajo', label: 'Rezagado' },
     { key: 'produccion', label: 'Produccion' },
-    { key: 'cierre', label: 'Cierre' },
+    { key: 'cierre', label: 'Disposicion' },
   ]
   const isScoop = equipment === 'scoop'
   const scoopRows = record.scoopTram.length ? record.scoopTram : [emptyHaulRow(defaultScoop)]
@@ -4167,8 +4317,13 @@ function RezagadoAssistantForm({
   }
 
   return (
-    <div className="capture-assistant-shell">
-      <PanelTitle title="Asistente rezagado" subtitle="Selecciona actividades y captura cantidades por equipo" />
+    <div className="capture-assistant-shell assistant-theme-purple">
+      <div className="assistant-template-header">
+        <Truck size={19} />
+        <strong>Rezagado / Retro</strong>
+        <Save size={19} />
+      </div>
+      <PanelTitle title="Captura operacional" subtitle="Rezagado, retro y disposicion por pasos" />
       <QuickCaptureBar
         label="Captura rapida"
         placeholder="Ej. ST-018 operador Juan nivel 10300 rezagado 8 camiones diesel 40"
@@ -4200,7 +4355,7 @@ function RezagadoAssistantForm({
                   <>
                     <QrScanButton onResult={(value) => updateScoopRow({ equipo: resolveScannedEquipment(value, scoopOptions) })} />
                     <div className="form-grid quick">
-                      <Field label="Equipo" value={scoopRow.equipo} options={scoopOptions} onChange={(value) => updateScoopRow({ equipo: value })} />
+                      <Field label="Equipo de carguio" value={scoopRow.equipo} options={scoopOptions} onChange={(value) => updateScoopRow({ equipo: value })} />
                       <Field label="Operador" value={scoopRow.operador} suggestions={catalog.operadores} onChange={(value) => updateScoopRow({ operador: value })} />
                       <Field label="Nivel / obra" value={scoopRow.nivelObra} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ nivelObra: value })} />
                       <Field label="Destino" value={scoopRow.destino} suggestions={catalog.niveles} onChange={(value) => updateScoopRow({ destino: value })} />
@@ -4252,6 +4407,9 @@ function RezagadoAssistantForm({
                     {selectedScoopActivities.map((key) => (
                       <Field key={key} label={`Cantidad ${haulActivityLabels[key]}`} type="number" value={scoopRow[key]} onChange={(value) => updateScoopRow({ [key]: Number(value) } as Partial<HaulRow>)} />
                     ))}
+                    <Field label="No. de ciclos" type="number" value={scoopRow.ciclos} onChange={(value) => updateScoopRow({ ciclos: Number(value) })} />
+                    <Field label="Tiempo ciclo promedio min" type="number" value={scoopRow.tiempoCicloPromedio} onChange={(value) => updateScoopRow({ tiempoCicloPromedio: Number(value) })} />
+                    <Field label="Toneladas cargadas TM" type="number" value={scoopRow.toneladasCargadas} onChange={(value) => updateScoopRow({ toneladasCargadas: Number(value) })} />
                     <Field label="Camiones" type="number" value={scoopRow.camiones} onChange={(value) => updateScoopRow({ camiones: Number(value) })} />
                     <Field label="Hor. inicial" type="number" value={scoopRow.horometroInicial} onChange={(value) => updateScoopRow({ horometroInicial: Number(value) })} />
                     <Field label="Hor. final" type="number" value={scoopRow.horometroFinal} onChange={(value) => updateScoopRow({ horometroFinal: Number(value) })} />
@@ -4272,11 +4430,29 @@ function RezagadoAssistantForm({
 
             {step === 'cierre' && (
               <>
-                <AssistantFocusTitle title="Observaciones del turno" meta="El detalle queda guardado en historial aunque no sincronices todavia." />
+                <AssistantFocusTitle title="Retro / disposicion" meta="Transporte, destino final y estado de vias." />
                 {isScoop ? (
-                  <TextArea label="Observaciones del equipo" value={scoopRow.observaciones} onChange={(value) => updateScoopRow({ observaciones: value })} />
+                  <>
+                    <div className="form-grid quick">
+                      <Field label="Equipo de transporte" value={scoopRow.equipoTransporte} options={transporteOptions} onChange={(value) => updateScoopRow({ equipoTransporte: value })} />
+                      <Field label="No. de viajes" type="number" value={scoopRow.viajes} onChange={(value) => updateScoopRow({ viajes: Number(value) })} />
+                      <Field label="Toneladas transportadas TM" type="number" value={scoopRow.toneladasTransportadas} onChange={(value) => updateScoopRow({ toneladasTransportadas: Number(value) })} />
+                      <Field label="Destino final" value={scoopRow.destinoFinal} options={destinoDisposicionOptions} onChange={(value) => updateScoopRow({ destinoFinal: value })} />
+                    </div>
+                    <EvaluationSelector label="Estado de vias" value={scoopRow.estadoVias} onChange={(value) => updateScoopRow({ estadoVias: value })} />
+                    <TextArea label="Observaciones del equipo" value={scoopRow.observaciones} onChange={(value) => updateScoopRow({ observaciones: value })} />
+                  </>
                 ) : (
-                  <TextArea label="Observaciones del equipo" value={retroRow.observaciones} onChange={(value) => updateRetroRow({ observaciones: value })} />
+                  <>
+                    <div className="form-grid quick">
+                      <Field label="Equipo de transporte" value={retroRow.equipoTransporte} options={transporteOptions} onChange={(value) => updateRetroRow({ equipoTransporte: value })} />
+                      <Field label="No. de viajes" type="number" value={retroRow.viajes} onChange={(value) => updateRetroRow({ viajes: Number(value) })} />
+                      <Field label="Toneladas transportadas TM" type="number" value={retroRow.toneladasTransportadas} onChange={(value) => updateRetroRow({ toneladasTransportadas: Number(value) })} />
+                      <Field label="Destino final" value={retroRow.destinoFinal} options={destinoDisposicionOptions} onChange={(value) => updateRetroRow({ destinoFinal: value })} />
+                    </div>
+                    <EvaluationSelector label="Estado de vias" value={retroRow.estadoVias} onChange={(value) => updateRetroRow({ estadoVias: value })} />
+                    <TextArea label="Observaciones del equipo" value={retroRow.observaciones} onChange={(value) => updateRetroRow({ observaciones: value })} />
+                  </>
                 )}
                 <TextArea label="Comentarios generales" value={record.comentarios} onChange={(value) => setRecord({ ...record, comentarios: value })} />
                 <RecordExtrasPanel record={record} setRecord={setRecord} />
@@ -5444,6 +5620,40 @@ function ChoiceButton({
   )
 }
 
+function EvaluationSelector({
+  label,
+  onChange,
+  value,
+}: {
+  label: string
+  onChange: (value: EvaluationStatus) => void
+  value: EvaluationStatus
+}) {
+  const options: { value: EvaluationStatus; label: string; className: string }[] = [
+    { value: 'bueno', label: 'Bueno', className: 'good' },
+    { value: 'regular', label: 'Regular', className: 'regular' },
+    { value: 'malo', label: 'Malo', className: 'bad' },
+  ]
+  return (
+    <div className="evaluation-field">
+      <span>{label}</span>
+      <div>
+        {options.map((option) => (
+          <button
+            className={`${option.className} ${value === option.value ? 'active' : ''}`}
+            key={option.value}
+            type="button"
+            onClick={() => onChange(value === option.value ? '' : option.value)}
+          >
+            {option.label}
+            {value === option.value && <CheckCircle2 size={15} />}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function Field({
   label,
   value,
@@ -5470,7 +5680,7 @@ function Field({
       {label}
       {options ? (
         <select className="scroll-select" required={required} value={textValue} onChange={(event) => onChange(event.target.value)}>
-          <option value="">Seleccionar equipo</option>
+          <option value="">Seleccionar</option>
           {textValue && !options.includes(textValue) && <option value={textValue}>{textValue}</option>}
           {options.map((option) => (
             <option key={option} value={option}>
@@ -5684,7 +5894,7 @@ async function buildBarrenacionPdf(record: BarrenacionRecord) {
     record.servicios,
   ]
   activityRows.forEach((value, index) => drawPdfText(page, font, value, 167, activityTop + index * 10, 5.8, 190))
-  drawPdfWrappedText(page, font, mergeNotes(record.comentarios, buildAnchoringNotes(record)), 478, 416, 125, 5.6, 7, 11)
+  drawPdfWrappedText(page, font, mergeNotes(record.comentarios, buildBarrenacionOperationalNotes(record)), 478, 416, 125, 5.6, 7, 11)
   drawPdfWrappedText(page, font, record.inasistencias, 610, 416, 120, 5.6, 7, 11)
 
   return pdfDoc.save()
@@ -5695,6 +5905,59 @@ function buildAnchoringNotes(record: BarrenacionRecord) {
     .filter((row) => isAnchoringJumbo(row.equipo) && (row.totalAnclas || row.totalMallas))
     .map((row) => `${row.equipo}: ${valueText(row.totalAnclas, true)} anclas / ${valueText(row.totalMallas, true)} mallas`)
   return rows.length ? `Anclaje y malla: ${rows.join('; ')}` : ''
+}
+
+function buildBarrenacionOperationalNotes(record: BarrenacionRecord) {
+  const detailRows = [...record.jumbo, ...record.maquinaPierna]
+    .filter((row) => hasDrillData(row) && (row.tipoBarra || row.barrenosProgramados || row.diametro || row.patronPerforacion))
+    .map((row) => {
+      const parts = [
+        row.tipoBarra ? `barra ${row.tipoBarra}` : '',
+        row.barrenosProgramados ? `${valueText(row.barrenosProgramados, true)} programados` : '',
+        row.diametro ? `${valueText(row.diametro, true)} mm` : '',
+        row.patronPerforacion ? `patron ${row.patronPerforacion}` : '',
+      ].filter(Boolean).join(', ')
+      return `${row.equipo || 'Equipo'}: ${parts}`
+    })
+  return [buildAnchoringNotes(record), detailRows.length ? `Perforacion: ${detailRows.join('; ')}` : ''].filter(Boolean).join('\n')
+}
+
+function buildBlastOperationalNotes(row: BlastRow) {
+  const parts = [
+    row.horaCarga ? `Carga ${row.horaCarga}` : '',
+    row.horaVoladura ? `Voladura ${row.horaVoladura}` : '',
+    row.tipoExplosivo ? `Explosivo ${row.tipoExplosivo}` : '',
+    row.cantidadExplosivo ? `${valueText(row.cantidadExplosivo, true)} kg` : '',
+    row.detonadores ? `${valueText(row.detonadores, true)} detonadores` : '',
+    row.sistemaIniciacion ? `Sistema ${row.sistemaIniciacion}` : '',
+    row.resultadoVoladura ? `Resultado ${row.resultadoVoladura}` : '',
+  ].filter(Boolean).join(' | ')
+  return mergeNotes(row.observaciones, parts)
+}
+
+function buildHaulDispositionNotes(row: HaulRow) {
+  const parts = [
+    row.ciclos ? `${valueText(row.ciclos, true)} ciclos` : '',
+    row.tiempoCicloPromedio ? `Ciclo ${valueText(row.tiempoCicloPromedio, true)} min` : '',
+    row.toneladasCargadas ? `${valueText(row.toneladasCargadas, true)} TM cargadas` : '',
+    row.equipoTransporte ? `Transporte ${row.equipoTransporte}` : '',
+    row.viajes ? `${valueText(row.viajes, true)} viajes` : '',
+    row.toneladasTransportadas ? `${valueText(row.toneladasTransportadas, true)} TM transportadas` : '',
+    row.destinoFinal ? `Destino final ${row.destinoFinal}` : '',
+    row.estadoVias ? `Vias ${row.estadoVias}` : '',
+  ].filter(Boolean).join(' | ')
+  return mergeNotes(row.observaciones, parts)
+}
+
+function buildRetroDispositionNotes(row: RetroRow) {
+  const parts = [
+    row.equipoTransporte ? `Transporte ${row.equipoTransporte}` : '',
+    row.viajes ? `${valueText(row.viajes, true)} viajes` : '',
+    row.toneladasTransportadas ? `${valueText(row.toneladasTransportadas, true)} TM transportadas` : '',
+    row.destinoFinal ? `Destino final ${row.destinoFinal}` : '',
+    row.estadoVias ? `Vias ${row.estadoVias}` : '',
+  ].filter(Boolean).join(' | ')
+  return mergeNotes(row.observaciones, parts)
 }
 
 async function buildRezagadoPdf(record: RezagadoRecord) {
@@ -5754,7 +6017,7 @@ function drawBlastPdfRow(page: PdfPage, font: PdfFont, row: BlastRow, top: numbe
   drawPdfText(page, font, valueText(row.horasServicio), 512, top, 5.2, 20)
   drawPdfText(page, font, valueText(row.anfoInicial), 543, top, 5.2, 40)
   drawPdfText(page, font, valueText(row.anfoFinal), 585, top, 5.2, 40)
-  drawPdfText(page, font, row.observaciones, 610, top, 5.2, 125)
+  drawPdfText(page, font, buildBlastOperationalNotes(row), 610, top, 5.2, 125)
 }
 
 function drawHaulPdfRow(page: PdfPage, font: PdfFont, row: HaulRow, top: number) {
@@ -5772,7 +6035,7 @@ function drawHaulPdfRow(page: PdfPage, font: PdfFont, row: HaulRow, top: number)
   drawPdfText(page, font, valueText(row.horometroInicial), 488, top, 5.2, 38)
   drawPdfText(page, font, valueText(row.horometroFinal), 530, top, 5.2, 38)
   drawPdfText(page, font, valueText(row.diesel), 568, top, 5.2, 28)
-  drawPdfText(page, font, row.observaciones, 598, top, 5.2, 155)
+  drawPdfText(page, font, buildHaulDispositionNotes(row), 598, top, 5.2, 155)
 }
 
 function drawRetroPdfRow(page: PdfPage, font: PdfFont, row: RetroRow, top: number) {
@@ -5788,7 +6051,7 @@ function drawRetroPdfRow(page: PdfPage, font: PdfFont, row: RetroRow, top: numbe
   drawPdfText(page, font, valueText(row.horometroInicial), 463, top, 5.2, 36)
   drawPdfText(page, font, valueText(row.horometroFinal), 504, top, 5.2, 36)
   drawPdfText(page, font, valueText(row.diesel), 535, top, 5.2, 32)
-  drawPdfText(page, font, row.observaciones, 565, top, 5.2, 180)
+  drawPdfText(page, font, buildRetroDispositionNotes(row), 565, top, 5.2, 180)
 }
 
 async function buildBarrenacionExcel(record: BarrenacionRecord) {
@@ -5884,7 +6147,7 @@ async function buildBarrenacionExcel(record: BarrenacionRecord) {
     sheet.getCell(`D${rowNumber}`).value = value
   })
   sheet.mergeCells(`H${activitiesStart + 1}:L${activitiesStart + 6}`)
-  sheet.getCell(`H${activitiesStart + 1}`).value = record.comentarios
+  sheet.getCell(`H${activitiesStart + 1}`).value = mergeNotes(record.comentarios, buildBarrenacionOperationalNotes(record))
   sheet.mergeCells(`M${activitiesStart + 1}:Q${activitiesStart + 6}`)
   sheet.getCell(`M${activitiesStart + 1}`).value = record.inasistencias
   const handoffRow = activitiesStart + 8
@@ -6020,7 +6283,7 @@ function addBlastExcelRows(sheet: ExcelJS.Worksheet, startRow: number, rows: Bla
           row.horasServicio,
           row.anfoInicial,
           row.anfoFinal,
-          row.observaciones,
+          buildBlastOperationalNotes(row),
         ]
       : []
     values.forEach((value, colIndex) => {
@@ -6051,7 +6314,7 @@ function addHaulExcelRows(sheet: ExcelJS.Worksheet, startRow: number, rows: Haul
           row.horometroInicial,
           row.horometroFinal,
           row.diesel,
-          row.observaciones,
+          buildHaulDispositionNotes(row),
         ]
       : []
     values.forEach((value, colIndex) => {
@@ -6080,7 +6343,7 @@ function addRetroExcelRows(sheet: ExcelJS.Worksheet, startRow: number, rows: Ret
           row.horometroInicial,
           row.horometroFinal,
           row.diesel,
-          row.observaciones,
+          buildRetroDispositionNotes(row),
         ]
       : []
     values.forEach((value, colIndex) => {
@@ -6303,9 +6566,9 @@ function normalizeRecord(record: MineRecord): MineRecord {
   if (baseRecord.type === 'barrenacion') {
     const barrenacionRecord = {
       ...baseRecord,
-      jumbo: Array.isArray(baseRecord.jumbo) ? baseRecord.jumbo : [],
-      maquinaPierna: Array.isArray(baseRecord.maquinaPierna) ? baseRecord.maquinaPierna : [],
-      voladuras: Array.isArray(baseRecord.voladuras) ? baseRecord.voladuras : [],
+      jumbo: Array.isArray(baseRecord.jumbo) ? baseRecord.jumbo.map(normalizeDrillRow) : [],
+      maquinaPierna: Array.isArray(baseRecord.maquinaPierna) ? baseRecord.maquinaPierna.map(normalizeDrillRow) : [],
+      voladuras: Array.isArray(baseRecord.voladuras) ? baseRecord.voladuras.map(normalizeBlastRow) : [],
       polvorero: baseRecord.polvorero ?? '',
       choferCamion: baseRecord.choferCamion ?? '',
       choferPipa: baseRecord.choferPipa ?? '',
@@ -6323,8 +6586,8 @@ function normalizeRecord(record: MineRecord): MineRecord {
   if (baseRecord.type === 'rezagado') {
     const rezagadoRecord = {
       ...baseRecord,
-      scoopTram: Array.isArray(baseRecord.scoopTram) ? baseRecord.scoopTram : [],
-      retro: Array.isArray(baseRecord.retro) ? baseRecord.retro : [],
+      scoopTram: Array.isArray(baseRecord.scoopTram) ? baseRecord.scoopTram.map(normalizeHaulRow) : [],
+      retro: Array.isArray(baseRecord.retro) ? baseRecord.retro.map(normalizeRetroRow) : [],
       comentarios: baseRecord.comentarios ?? '',
     } as RezagadoRecord
     const scoopRow = rezagadoRecord.scoopTram[0] ?? emptyHaulRow(defaultScoop)
@@ -6349,6 +6612,135 @@ function normalizeRecord(record: MineRecord): MineRecord {
     actividadesOperacion: baseRecord.actividadesOperacion ?? '',
     observaciones: baseRecord.observaciones ?? '',
   } as SeguridadRecord
+}
+
+function normalizeNumber(value: unknown) {
+  const numberValue = Number(value || 0)
+  return Number.isFinite(numberValue) ? numberValue : 0
+}
+
+function normalizeEvaluationStatus(value: unknown): EvaluationStatus {
+  return value === 'bueno' || value === 'regular' || value === 'malo' ? value : ''
+}
+
+function normalizeDrillRow(row: Partial<DrillRow>): DrillRow {
+  const equipo = typeof row.equipo === 'string' && row.equipo ? row.equipo : defaultJumbo
+  return {
+    ...emptyDrillRow(equipo),
+    ...row,
+    equipo,
+    operador: typeof row.operador === 'string' ? row.operador : '',
+    ayudante: typeof row.ayudante === 'string' ? row.ayudante : '',
+    nivelObra: typeof row.nivelObra === 'string' ? row.nivelObra : '',
+    rpaCfte: typeof row.rpaCfte === 'string' ? row.rpaCfte : '',
+    tipoBarra: typeof row.tipoBarra === 'string' && row.tipoBarra ? row.tipoBarra : (tipoBarraOptions[0] ?? ''),
+    longitud: normalizeNumber(row.longitud),
+    cuele: normalizeNumber(row.cuele),
+    desarrollo: normalizeNumber(row.desarrollo),
+    barrenosProgramados: normalizeNumber(row.barrenosProgramados),
+    barrenosDados: normalizeNumber(row.barrenosDados),
+    barrenosCargados: normalizeNumber(row.barrenosCargados),
+    metrosDados: normalizeNumber(row.metrosDados),
+    diametro: normalizeNumber(row.diametro),
+    patronPerforacion: typeof row.patronPerforacion === 'string' ? row.patronPerforacion : '',
+    horasServicio: normalizeNumber(row.horasServicio),
+    zanco: normalizeNumber(row.zanco),
+    cople: normalizeNumber(row.cople),
+    barra: normalizeNumber(row.barra),
+    broca: normalizeNumber(row.broca),
+    horometroDieselInicial: normalizeNumber(row.horometroDieselInicial),
+    horometroDieselFinal: normalizeNumber(row.horometroDieselFinal),
+    horometroElectInicial: normalizeNumber(row.horometroElectInicial),
+    horometroElectFinal: normalizeNumber(row.horometroElectFinal),
+    totalAnclas: normalizeNumber(row.totalAnclas),
+    totalMallas: normalizeNumber(row.totalMallas),
+  }
+}
+
+function normalizeBlastRow(row: Partial<BlastRow>): BlastRow {
+  return {
+    ...emptyBlastRow(),
+    ...row,
+    obra: typeof row.obra === 'string' ? row.obra : '',
+    oficial: typeof row.oficial === 'string' ? row.oficial : '',
+    ayudante: typeof row.ayudante === 'string' ? row.ayudante : '',
+    rpaCfte: typeof row.rpaCfte === 'string' ? row.rpaCfte : '',
+    horaCarga: typeof row.horaCarga === 'string' ? row.horaCarga : '',
+    horaVoladura: typeof row.horaVoladura === 'string' ? row.horaVoladura : '',
+    tipoExplosivo: typeof row.tipoExplosivo === 'string' && row.tipoExplosivo ? row.tipoExplosivo : (explosivoOptions[0] ?? ''),
+    cantidadExplosivo: normalizeNumber(row.cantidadExplosivo),
+    longitud: normalizeNumber(row.longitud),
+    cuele: normalizeNumber(row.cuele),
+    desarrollo: normalizeNumber(row.desarrollo),
+    barrenosPegados: normalizeNumber(row.barrenosPegados),
+    metrosPegados: normalizeNumber(row.metrosPegados),
+    detonadores: normalizeNumber(row.detonadores),
+    sistemaIniciacion: typeof row.sistemaIniciacion === 'string' && row.sistemaIniciacion ? row.sistemaIniciacion : (sistemaIniciacionOptions[0] ?? ''),
+    resultadoVoladura: normalizeEvaluationStatus(row.resultadoVoladura),
+    horasServicio: normalizeNumber(row.horasServicio),
+    anfoInicial: normalizeNumber(row.anfoInicial),
+    anfoFinal: normalizeNumber(row.anfoFinal),
+    observaciones: typeof row.observaciones === 'string' ? row.observaciones : '',
+  }
+}
+
+function normalizeHaulRow(row: Partial<HaulRow>): HaulRow {
+  const equipo = typeof row.equipo === 'string' && row.equipo ? row.equipo : defaultScoop
+  return {
+    ...emptyHaulRow(equipo),
+    ...row,
+    selectedActivities: Array.isArray(row.selectedActivities) ? row.selectedActivities.filter(isHaulActivity) : ['rezagado'],
+    equipo,
+    operador: typeof row.operador === 'string' ? row.operador : '',
+    nivelObra: typeof row.nivelObra === 'string' ? row.nivelObra : '',
+    destino: typeof row.destino === 'string' ? row.destino : '',
+    ciclos: normalizeNumber(row.ciclos),
+    tiempoCicloPromedio: normalizeNumber(row.tiempoCicloPromedio),
+    toneladasCargadas: normalizeNumber(row.toneladasCargadas),
+    equipoTransporte: typeof row.equipoTransporte === 'string' && row.equipoTransporte ? row.equipoTransporte : (transporteOptions[0] ?? ''),
+    viajes: normalizeNumber(row.viajes),
+    toneladasTransportadas: normalizeNumber(row.toneladasTransportadas),
+    destinoFinal: typeof row.destinoFinal === 'string' && row.destinoFinal ? row.destinoFinal : (destinoDisposicionOptions[0] ?? ''),
+    estadoVias: normalizeEvaluationStatus(row.estadoVias),
+    rezagado: normalizeNumber(row.rezagado),
+    traspaleo: normalizeNumber(row.traspaleo),
+    limpia: normalizeNumber(row.limpia),
+    balastreo: normalizeNumber(row.balastreo),
+    planilla: normalizeNumber(row.planilla),
+    relleno: normalizeNumber(row.relleno),
+    camiones: normalizeNumber(row.camiones),
+    horometroInicial: normalizeNumber(row.horometroInicial),
+    horometroFinal: normalizeNumber(row.horometroFinal),
+    diesel: normalizeNumber(row.diesel),
+    observaciones: typeof row.observaciones === 'string' ? row.observaciones : '',
+  }
+}
+
+function normalizeRetroRow(row: Partial<RetroRow>): RetroRow {
+  const equipo = typeof row.equipo === 'string' && row.equipo ? row.equipo : defaultRetro
+  return {
+    ...emptyRetroRow(),
+    ...row,
+    selectedActivities: Array.isArray(row.selectedActivities) ? row.selectedActivities.filter(isRetroActivity) : ['amacice'],
+    equipo,
+    operador: typeof row.operador === 'string' ? row.operador : '',
+    nivelObra: typeof row.nivelObra === 'string' ? row.nivelObra : '',
+    equipoTransporte: typeof row.equipoTransporte === 'string' && row.equipoTransporte ? row.equipoTransporte : (transporteOptions[0] ?? ''),
+    viajes: normalizeNumber(row.viajes),
+    toneladasTransportadas: normalizeNumber(row.toneladasTransportadas),
+    destinoFinal: typeof row.destinoFinal === 'string' && row.destinoFinal ? row.destinoFinal : (destinoDisposicionOptions[0] ?? ''),
+    estadoVias: normalizeEvaluationStatus(row.estadoVias),
+    amacice: normalizeNumber(row.amacice),
+    reAmacice: normalizeNumber(row.reAmacice),
+    tableo: normalizeNumber(row.tableo),
+    limpia: normalizeNumber(row.limpia),
+    balastreo: normalizeNumber(row.balastreo),
+    mtAcequia: normalizeNumber(row.mtAcequia),
+    horometroInicial: normalizeNumber(row.horometroInicial),
+    horometroFinal: normalizeNumber(row.horometroFinal),
+    diesel: normalizeNumber(row.diesel),
+    observaciones: typeof row.observaciones === 'string' ? row.observaciones : '',
+  }
 }
 
 function normalizeEvidencePhotos(value: unknown): EvidencePhoto[] {
@@ -6907,10 +7299,15 @@ function computeKpis(records: MineRecord[]) {
         acc.barrenosDados += sum(drillRows, 'barrenosDados')
         acc.barrenosCargados += sum(drillRows, 'barrenosCargados')
         acc.metrosPegados += sum(record.voladuras, 'metrosPegados')
+        acc.explosivoKg += sum(record.voladuras, 'cantidadExplosivo')
       }
       if (record.type === 'rezagado') {
         acc.rezagado += sum(record.scoopTram, 'rezagado')
         acc.camiones += sum(record.scoopTram, 'camiones')
+        acc.toneladasRezagadas += sum(record.scoopTram, 'toneladasCargadas')
+          + sum(record.scoopTram, 'toneladasTransportadas')
+          + sum(record.retro, 'toneladasTransportadas')
+        acc.viajes += sum(record.scoopTram, 'viajes') + sum(record.retro, 'viajes')
         acc.diesel += sum(record.scoopTram, 'diesel') + sum(record.retro, 'diesel')
       }
       if (record.type === 'seguridad') {
@@ -6928,8 +7325,11 @@ function computeKpis(records: MineRecord[]) {
       barrenosDados: 0,
       barrenosCargados: 0,
       rezagado: 0,
+      toneladasRezagadas: 0,
       camiones: 0,
+      viajes: 0,
       diesel: 0,
+      explosivoKg: 0,
       seguridad: 0,
       accidentes: 0,
       incidentes: 0,
@@ -7008,12 +7408,12 @@ function validateBarrenacionReview(record: BarrenacionRecord, warnings: string[]
     if (!row.nivelObra.trim()) warnings.push(`Barrenacion equipo ${index + 1}: falta nivel/obra.`)
     if (row.horometroDieselFinal > 0 && row.horometroDieselFinal < row.horometroDieselInicial) warnings.push(`Barrenacion equipo ${index + 1}: horometro diesel final menor al inicial.`)
     if (row.horometroElectFinal > 0 && row.horometroElectFinal < row.horometroElectInicial) warnings.push(`Barrenacion equipo ${index + 1}: horometro electrico final menor al inicial.`)
-    if (!row.barrenosDados && !row.barrenosCargados && !row.metrosDados && !row.totalAnclas && !row.totalMallas) warnings.push(`Barrenacion equipo ${index + 1}: produccion en cero.`)
+    if (!row.barrenosDados && !row.barrenosCargados && !row.metrosDados && !row.desarrollo && !row.totalAnclas && !row.totalMallas) warnings.push(`Barrenacion equipo ${index + 1}: produccion en cero.`)
   })
   blastRows.forEach((row, index) => {
     if (!row.obra.trim()) warnings.push(`Voladura ${index + 1}: falta obra/frente.`)
     if (!row.oficial.trim()) warnings.push(`Voladura ${index + 1}: falta oficial.`)
-    if (!row.barrenosPegados && !row.metrosPegados) warnings.push(`Voladura ${index + 1}: produccion en cero.`)
+    if (!row.barrenosPegados && !row.metrosPegados && !row.cantidadExplosivo && !row.detonadores) warnings.push(`Voladura ${index + 1}: produccion en cero.`)
   })
 }
 
@@ -7025,13 +7425,13 @@ function validateRezagadoReview(record: RezagadoRecord, warnings: string[]) {
     if (!row.operador.trim()) warnings.push(`Scoop ${index + 1}: falta operador.`)
     if (!row.nivelObra.trim()) warnings.push(`Scoop ${index + 1}: falta nivel/obra.`)
     if (row.horometroFinal > 0 && row.horometroFinal < row.horometroInicial) warnings.push(`Scoop ${index + 1}: horometro final menor al inicial.`)
-    if (!row.rezagado && !row.traspaleo && !row.limpia && !row.balastreo && !row.planilla && !row.relleno) warnings.push(`Scoop ${index + 1}: trabajo en cero.`)
+    if (!row.rezagado && !row.traspaleo && !row.limpia && !row.balastreo && !row.planilla && !row.relleno && !row.toneladasCargadas && !row.toneladasTransportadas && !row.viajes) warnings.push(`Scoop ${index + 1}: trabajo en cero.`)
   })
   retroRows.forEach((row, index) => {
     if (!row.operador.trim()) warnings.push(`Retro ${index + 1}: falta operador.`)
     if (!row.nivelObra.trim()) warnings.push(`Retro ${index + 1}: falta nivel/obra.`)
     if (row.horometroFinal > 0 && row.horometroFinal < row.horometroInicial) warnings.push(`Retro ${index + 1}: horometro final menor al inicial.`)
-    if (!row.amacice && !row.reAmacice && !row.tableo && !row.limpia && !row.balastreo && !row.mtAcequia) warnings.push(`Retro ${index + 1}: trabajo en cero.`)
+    if (!row.amacice && !row.reAmacice && !row.tableo && !row.limpia && !row.balastreo && !row.mtAcequia && !row.toneladasTransportadas && !row.viajes) warnings.push(`Retro ${index + 1}: trabajo en cero.`)
   })
 }
 
@@ -7427,9 +7827,12 @@ function hasDrillData(row: DrillRow) {
       || row.ayudante
       || row.nivelObra
       || row.rpaCfte
+      || row.barrenosProgramados
       || row.barrenosDados
       || row.barrenosCargados
       || row.metrosDados
+      || row.diametro
+      || row.patronPerforacion
       || row.horasServicio
       || row.totalAnclas
       || row.totalMallas,
@@ -7442,8 +7845,13 @@ function hasBlastData(row: BlastRow) {
       || row.oficial
       || row.ayudante
       || row.rpaCfte
+      || row.horaCarga
+      || row.horaVoladura
+      || row.cantidadExplosivo
       || row.barrenosPegados
       || row.metrosPegados
+      || row.detonadores
+      || row.resultadoVoladura
       || row.horasServicio
       || row.observaciones,
   )
@@ -7454,6 +7862,13 @@ function hasHaulData(row: HaulRow) {
     row.operador
       || row.nivelObra
       || row.destino
+      || row.ciclos
+      || row.toneladasCargadas
+      || row.equipoTransporte
+      || row.viajes
+      || row.toneladasTransportadas
+      || row.destinoFinal
+      || row.estadoVias
       || row.rezagado
       || row.traspaleo
       || row.limpia
@@ -7469,6 +7884,11 @@ function hasRetroData(row: RetroRow) {
   return Boolean(
     row.operador
       || row.nivelObra
+      || row.equipoTransporte
+      || row.viajes
+      || row.toneladasTransportadas
+      || row.destinoFinal
+      || row.estadoVias
       || row.amacice
       || row.reAmacice
       || row.tableo
